@@ -12,14 +12,8 @@ from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 import numpy as np
 import cv2
 
-# Importa le funzioni di caricamento e l'API di stima
-from core.vision.api import (
-    estimate_truncated_ico_from_image,
-)
-from utils.utils import load_camera_calibration, load_ico_transforms
-
 # Importa il nuovo modulo robotico
-from core.robot.robot_transform import get_base_to_camera_matrix, transform_camera_to_robot
+from core.robot.robot_transform import get_base_to_camera_matrix
 
 from utils.config_models import (
     AppConfig,

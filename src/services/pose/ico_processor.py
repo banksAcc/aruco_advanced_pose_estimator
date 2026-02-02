@@ -36,6 +36,8 @@ class IcoPoseProcessor:
         """
         pose_cfg = self.pose_cfg
         dict_name = pose_cfg.dictionary
+
+        #FIXME: SIAMO SICURI CHE LA CONVERSIONE è CORRETTA ?  
         # Conversione mm -> metri
         marker_size = float(pose_cfg.marker_size_mm) / 1000.0 
         
@@ -59,23 +61,23 @@ class IcoPoseProcessor:
                 self._cached_calib_path = str(calib_path)
             except Exception as e:
                 return ({"file": packet.filename, "ok": False, "reason": f"calib_load_err: {e}"}, None)
-
-        # B. Trasformazioni Faccia->Corpo (con SCALING)
+        
+        #TODO: descrivere il processo di scalig, cosa stiamo facendo e a che serve
+        # B. Trasformazioni Faccia->Corpo (CORRETTO: NESSUNO SCALING)
         if self._cached_trans_path != str(transform_path):
             try:
-                raw_transforms = load_ico_transforms(str(transform_path))
+                # Carichiamo le trasformazioni pure. Assumiamo che il JSON sia
+                # già corretto e in METRI.
+                self._transforms = load_ico_transforms(str(transform_path))
                 
-                # Applichiamo qui la scala del raggio reale.
-                ico_radius = getattr(pose_cfg, 'radius_m', 0.11) 
-                
-                scaled_transforms = {}
-                for key, T in raw_transforms.items():
-                    T_real = T.copy()
-                    # Scaliamo la traslazione (ultime 3 righe, 4a colonna)
-                    T_real[:3, 3] *= ico_radius
-                    scaled_transforms[key] = T_real
-                
-                self._transforms = scaled_transforms
+                # --- DEBUG ---
+                # Verifica immediata per evitare dubbi futuri
+                first_key = next(iter(self._transforms))
+                t_sample = self._transforms[first_key][:3, 3]
+                print(f"[ICO-LOAD] Loaded transforms. Sample ({first_key}) norm: {np.linalg.norm(t_sample):.4f}m")
+                # Se leggi ~0.058m qui, è PERFETTO.
+                # -------------
+
                 self._cached_trans_path = str(transform_path)
             except Exception as e:
                  return ({"file": packet.filename, "ok": False, "reason": f"trans_load_err: {e}"}, None)
@@ -89,19 +91,12 @@ class IcoPoseProcessor:
                 transforms=self._transforms,
                 aruco_dict=dict_name,
                 marker_size=marker_size,
-                
-                # Parametri Tuning Stabilità
-                min_marker_area_px=250.0,
-                weight_exponent=1.9,
-                outlier_distance_threshold=0.04,
-                
                 return_overlay=True,
-                timestamp=packet.timestamp,
             )
             
-        except ValueError:
+        except ValueError as e:
             return (
-                {"file": packet.filename, "ok": False, "reason": "no_markers"},
+                {"file": packet.filename, "ok": False, "reason": f"pose_fail:  {str(e)}"},
                 None,
             )
         except Exception as e:

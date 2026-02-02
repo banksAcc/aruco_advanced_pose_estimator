@@ -130,3 +130,70 @@ def draw_detected_markers(img: np.ndarray, detections, poses, K, dist, size,
             draw_center_point(green_centers[i], (0, 255, 0))
 
     return out
+
+
+# pc/app/algo/viz.py
+import cv2 as cv
+import numpy as np
+from typing import Tuple, List, Optional
+
+# ... _get_sphere_geometry e draw_sphere_overlay rimangono invariati ...
+# ... (assicurati solo che draw_sphere_overlay restituisca l'immagine modificata) ...
+
+def draw_large_axes(img: np.ndarray, K: np.ndarray, dist: np.ndarray, 
+                    rvec: np.ndarray, tvec: np.ndarray, scale: float = 1.0):
+    """Disegna assi X,Y,Z molto visibili e spessi."""
+    # Lunghezza assi: es. 0.05m * scale
+    length = 0.05 * scale
+    cv.drawFrameAxes(img, K, dist, rvec, tvec, length, 4) # Spessore 4
+    return img
+
+def draw_detected_markers_with_projection(
+    img: np.ndarray, 
+    detections, 
+    poses, 
+    K, 
+    dist, 
+    marker_size,
+    projections: List[Optional[np.ndarray]] = None
+):
+    """
+    Disegna:
+    1. Box del marker (Giallo)
+    2. Centro del marker (Punto Blu)
+    3. Linea di collegamento: Centro Marker -> Centro Sfera Proiettato (Ghost)
+    4. Centro Sfera Proiettato (Pallino Ciano)
+    
+    NON disegna assi RGB sui marker.
+    """
+    out = img.copy()
+    if projections is None:
+        projections = [None] * len(detections)
+
+    for det, pose, proj_tvec in zip(detections, poses, projections):
+        # 1. Box Marker (Giallo)
+        pts = det.corners.reshape((-1, 1, 2)).astype(np.int32)
+        cv.polylines(out, [pts], True, (0, 255, 255), 2)
+        
+        # Calcolo centro 2D del marker
+        marker_center_2d = np.mean(det.corners, axis=0).astype(int)
+        cx_m, cy_m = marker_center_2d[0], marker_center_2d[1]
+        
+        # 2. Pallino sul Marker (Blu scuro)
+        cv.circle(out, (cx_m, cy_m), 4, (255, 0, 0), -1)
+
+        # Se abbiamo la proiezione del centro sfera (Ghost)
+        if proj_tvec is not None:
+            # Proiezione 3D -> 2D del ghost center
+            ghost_2d, _ = cv.projectPoints(proj_tvec.reshape(1, 1, 3), 
+                                           np.zeros(3), np.zeros(3), 
+                                           K, dist)
+            gx, gy = ghost_2d[0].ravel().astype(int)
+            
+            # 3. Linea di collegamento (Marker -> Ghost) - Ciano sottile
+            cv.line(out, (cx_m, cy_m), (gx, gy), (255, 255, 0), 1, cv.LINE_AA)
+            
+            # 4. Pallino sul Ghost Center - Ciano
+            cv.circle(out, (gx, gy), 4, (255, 255, 0), -1)
+            
+    return out

@@ -68,13 +68,12 @@ def _compute_mean_pose(poses: List[np.ndarray], weights: np.ndarray) -> np.ndarr
 def average_poses(
     poses_4x4: List[np.ndarray], 
     weights: Optional[List[float]] = None,
-    alternatives_4x4: Optional[List[Optional[np.ndarray]]] = None, 
     weight_exponent: float = 2.0,
     outlier_distance_threshold: Optional[float] = None
-) -> Tuple[np.ndarray, List[int]]:
+) -> np.ndarray:
     """
-    Calcola la media pesata in modo ITERATIVO.
-    Cerca la combinazione migliore di (Normal/Flipped) che minimizza l'errore globale.
+    Calcola la media pesata delle pose rimuovendo gli outlier.
+    NON gestisce più la logica di flip/ambiguità.
     """
     n = len(poses_4x4)
     if n == 0:
@@ -86,96 +85,44 @@ def average_poses(
     else:
         raw_weights = np.array(weights, dtype=float)
     
+    # Evitiamo pesi zero e applichiamo l'esponente
     raw_weights = np.maximum(raw_weights, 1e-3)
     proc_weights = np.power(raw_weights, weight_exponent)
 
-    # Stato corrente: True se usiamo l'alternativa (Flipped), False se usiamo la Primaria
-    # Iniziamo tutti come Primari (False)
-    current_flip_state = [False] * n
+    # 2. Calcolo della media preliminare (su TUTTI i marker)
+    # Assumo che _compute_mean_pose sia definita altrove nel tuo codice
+    T_initial = _compute_mean_pose(poses_4x4, proc_weights)
     
-    # Lista delle pose correntemente selezionate
-    current_poses = [p.copy() for p in poses_4x4]
+    # Se non c'è soglia di outlier, abbiamo finito qui
+    if outlier_distance_threshold is None or outlier_distance_threshold <= 0:
+        return T_initial
 
-    MAX_ITER = 10
-    print(f"\n[AVG] Starting Iterative Refinement on {n} markers.")
-
-    # --- CICLO DI CONVERGENZA (EM-like) ---
-    for it in range(MAX_ITER):
-        # A. Calcola Media Corrente
-        T_mean = _compute_mean_pose(current_poses, proc_weights)
-        t_center = T_mean[:3, 3]
-        
-        changes_count = 0
-        
-        # B. Rivaluta ogni marker rispetto alla NUOVA media
-        for i in range(n):
-            # Se non abbiamo alternative, saltiamo la logica di flip
-            if alternatives_4x4 is None or alternatives_4x4[i] is None:
-                continue
-
-            # Calcola distanze per le due opzioni
-            pose_prim = poses_4x4[i]
-            pose_alt = alternatives_4x4[i]
-            
-            dist_prim = np.linalg.norm(pose_prim[:3, 3] - t_center)
-            dist_alt = np.linalg.norm(pose_alt[:3, 3] - t_center)
-            
-            # Logica decisionale geometrica pura: chi è più vicino al baricentro?
-            should_be_flipped = (dist_alt < dist_prim)
-            
-            # Applica il cambiamento se necessario
-            if should_be_flipped != current_flip_state[i]:
-                current_flip_state[i] = should_be_flipped
-                current_poses[i] = pose_alt if should_be_flipped else pose_prim
-                changes_count += 1
-        
-        # C. Exit condition
-        if changes_count == 0:
-            print(f"  > Converged at iteration {it}")
-            break
+    # 3. Filtraggio Outlier (Distanza dalla media preliminare)
+    t_center = T_initial[:3, 3]
     
-    # --- FILTRAGGIO FINALE OUTLIER ---
-    # Ora che abbiamo la configurazione geometrica più stabile,
-    # scartiamo comunque chi è troppo lontano (es. errore di rilevamento vero, non solo flip)
-    
-    # Ricalcoliamo la media finale stabile
-    T_final_candidate = _compute_mean_pose(current_poses, proc_weights)
-    t_final = T_final_candidate[:3, 3]
-    
-    final_poses_for_avg = []
-    final_weights_for_avg = []
-    final_flipped_indices = []
-
-    print(f"  > Final Check (Threshold: {outlier_distance_threshold})")
+    final_poses = []
+    final_weights = []
 
     for i in range(n):
-        P_curr = current_poses[i]
-        w_curr = proc_weights[i]
-        is_flipped = current_flip_state[i]
+        pose = poses_4x4[i]
+        w = proc_weights[i]
         
-        dist_curr = np.linalg.norm(P_curr[:3, 3] - t_final)
+        # Calcola distanza euclidea dal centro calcolato
+        dist = np.linalg.norm(pose[:3, 3] - t_center)
         
-        status = "DROP"
-        
-        # Se la soglia è attiva, controlliamo la distanza
-        if outlier_distance_threshold is None or outlier_distance_threshold <= 0 or dist_curr <= outlier_distance_threshold:
-            final_poses_for_avg.append(P_curr)
-            final_weights_for_avg.append(w_curr)
-            
-            if is_flipped:
-                final_flipped_indices.append(i)
-                status = "KEEP (Flipped)"
-            else:
-                status = "KEEP (Normal)"
-        
-        print(f"    [{i}] D={dist_curr:.3f} | {status}")
+        if dist <= outlier_distance_threshold:
+            final_poses.append(pose)
+            final_weights.append(w)
+        else:
+            print(f"  > Dropped marker {i} (Dist: {dist:.3f})")
 
-    # Fallback: se abbiamo scartato tutti, torniamo la media candidata (meglio di niente)
-    if not final_poses_for_avg:
-        print("  [AVG] WARNING: All markers rejected by threshold. Returning best guess.")
-        return T_final_candidate, [i for i, f in enumerate(current_flip_state) if f]
+    # 4. Calcolo finale sui soli inlier
+    if not final_poses:
+        # Se abbiamo scartato tutto (troppo restrittivi), torniamo la media iniziale come fallback
+        print("  [AVG] WARNING: All markers rejected. Returning initial mean.")
+        return T_initial
 
-    # Calcolo definitivo su sottoinsieme pulito
-    T_final = _compute_mean_pose(final_poses_for_avg, np.array(final_weights_for_avg))
+    # Ricalcoliamo la media solo con i marker "buoni"
+    T_final = _compute_mean_pose(final_poses, np.array(final_weights))
     
-    return T_final, final_flipped_indices
+    return T_final

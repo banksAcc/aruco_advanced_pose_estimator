@@ -16,13 +16,14 @@ capture:
   test_source_dir: "../image_to_be_used"   # used if simulate_camera=true
 
 pose:
+  radius_m: 0.05818
   enabled: true
   method: "ico"                   # "ico" | "custom"
   max_parallel_jobs: 5             # 3 is fine (CPU permitting)
   save_overlay: true               # save diagnostic overlays next to raw frames using *_overlay suffix
   ico:
     dictionary: "4X4_50"
-    marker_size_mm: 21.679
+    marker_size_mm: 21.33
     transform_file: ../calibration/transforms.json          # leave null to use built-in transforms
   camera_calibration_npz: "../calibration/calib_data.npz"  # must contain 'camera_matrix' and 'dist_coeffs'
 
@@ -31,7 +32,7 @@ pose:
 
 runtime:
   debug: true                      # extra debug behavior
-  log_level: INFO                 # DEBUG, INFO, WARNING, ERROR
+  log_level: DEBUG                 # DEBUG, INFO, WARNING, ERROR
   log_to_file: true               # write global app.log in addition to console
 
 plot:
