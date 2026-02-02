@@ -364,4 +364,3 @@ class TestCapture(BaseCapture):
 
     def _on_loop_end(self, log: Callable[[str, str], None]) -> None:
         log("Test mode: loop finished", "info")
-

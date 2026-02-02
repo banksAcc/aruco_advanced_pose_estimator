@@ -10,26 +10,16 @@ from typing import Optional
 from services.ble.ble_client import run_ble_client
 from services.pose.pose_service import PoseWorker
 from services.ble.session_manager import SessionManager
-from utils.config_models import AppConfig
+from utils.utils import load_config
 
 from utils.logger import get_logger, setup_logging
 from utils.utils import Encode_as_bytes
-import yaml
 
 
 # Loop policy recommended for Windows
 
 if sys.platform.startswith("win"):
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-
-def load_config(path: Path) -> AppConfig:
-    """Load a YAML configuration file into :class:`AppConfig`."""
-
-    with path.open("r", encoding="utf-8") as f:
-        data: Optional[dict] = yaml.safe_load(f)
-    if not isinstance(data, dict):
-        data = {}
-    return AppConfig.from_mapping(data)
 
 async def main() -> None:
     """Set up components and run the BLE client loop."""

@@ -1,10 +1,22 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Tuple, Dict
+from typing import Tuple, Dict, Optional
 from dataclasses import dataclass
 import json
 import numpy as np
+from .config_models import AppConfig
+import yaml
+
+
+def load_config(path: Path) -> AppConfig:
+    """Load a YAML configuration file into :class:`AppConfig`."""
+
+    with path.open("r", encoding="utf-8") as f:
+        data: Optional[dict] = yaml.safe_load(f)
+    if not isinstance(data, dict):
+        data = {}
+    return AppConfig.from_mapping(data)
 
 @dataclass(frozen=True)
 class Encode_as_bytes:
@@ -44,6 +56,5 @@ def load_ico_transforms(json_path: str) -> Dict[str, np.ndarray]:
     # Converte le liste in numpy array
     return {k: np.asarray(v, dtype=float) for k, v in data.items()}
 
-#TODO: INUTILE AVERE IL MESSAGGIO HARD CODEDE QUI, PASSARE LA STRING IN CONFIG. POI I DUE ELEMENTI SONO USATI SOLO IN POSE_SERVICES, QUINDI INUTILE AVERLI QUI
 BLE_COMPUTATION_START = Encode_as_bytes("COMPUTATION START")
 BLE_COMPUTATION_END = Encode_as_bytes("COMPUTATION END")

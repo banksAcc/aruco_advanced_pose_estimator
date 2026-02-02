@@ -20,7 +20,6 @@ from utils.utils import Encode_as_bytes
 if TYPE_CHECKING:  # pragma: no cover - typing helper
     from session_manager import SessionManager
 
-# TODO: METTERE LE VARIABLI DIRETTAMENTE NEL FILE DI CONFIGURAZIONE CENTRALE
 START_CMD = "START" 
 END_CMD = "END"  # user confirmed END
 

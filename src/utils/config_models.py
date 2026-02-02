@@ -100,119 +100,88 @@ class CaptureConfig:
             test_source_dir=test_source_dir,
         )
 
+@dataclass(frozen=True)
+class IcoPoseConfig:
+    """Configurazione specifica per il backend icosaedro troncato."""
+    dictionary: str = "4X4_50"
+    marker_size_mm: float = 21.33
+    transform_file: Optional[Path] = None
+    geo_radius: float = 0.061035
+    z_shift_tip: float = 0.20620
+
+    @classmethod
+    def from_mapping(cls, raw: Any) -> "IcoPoseConfig":
+        data = _as_mapping(raw)
+        tf = data.get("transform_file")
+        return cls(
+            dictionary=str(data.get("dictionary", cls.dictionary)),
+            marker_size_mm=_coerce_float(data.get("marker_size_mm"), cls.marker_size_mm),
+            transform_file=Path(tf) if tf else None,
+            geo_radius=_coerce_float(data.get("geo_radius"), cls.geo_radius),
+            z_shift_tip=_coerce_float(data.get("z_shift_tip"), cls.z_shift_tip),
+        )
+
 
 @dataclass(frozen=True)
 class MarkerFilterConfig:
-    """Configuration for the optional ArUco marker filter."""
-
-    active_marker_filter: bool = False
-    try_adj_marker: bool = False
-    area_threshold_px: float = 0.0
-    min_flip_interval_s: float = 0.0
+    """Configurazione per il filtraggio e pesatura dei marker (marker_filter_average)."""
+    min_area: float = 100.0
+    weight_exponent: float = 1.5
+    outliers_threshold: float = 0.030
 
     @classmethod
     def from_mapping(cls, raw: Any) -> "MarkerFilterConfig":
         data = _as_mapping(raw)
         return cls(
-            active_marker_filter=_coerce_bool(
-                data.get("active_marker_filter"), cls.active_marker_filter
-            ),
-            try_adj_marker=_coerce_bool(data.get("try_adj_marker"), cls.try_adj_marker),
-            area_threshold_px=_coerce_float(
-                data.get("area_threshold_px"), cls.area_threshold_px
-            ),
-            min_flip_interval_s=_coerce_float(
-                data.get("min_flip_interval_s"), cls.min_flip_interval_s
-            ),
+            min_area=_coerce_float(data.get("min_area"), cls.min_area),
+            weight_exponent=_coerce_float(data.get("weight_exponent"), cls.weight_exponent),
+            outliers_threshold=_coerce_float(data.get("outliers_threshold"), cls.outliers_threshold),
         )
 
-
 @dataclass(frozen=True)
-class CubePoseConfig:
-    """Configuration specific to the default cube pose estimation backend."""
-
-    dictionary: str = "4X4_50"
-    marker_size_mm: float = 55.0
-    cube_size_mm: float = 60.0
-    pair_strategy: str = "first"
-    wand_offset_m: float = 0.0
-    wand_directions: Mapping[int, Any] = field(default_factory=dict)
-    marker_filter: MarkerFilterConfig = field(default_factory=MarkerFilterConfig)
+class SubpixelConfig:
+    """Parametri per l'affinamento subpixel (subpixel_config)."""
+    subpixel_iter: int = 500
+    subpixel_eps: float = 0.0001
 
     @classmethod
-    def from_mapping(cls, raw: Any) -> "CubePoseConfig":
+    def from_mapping(cls, raw: Any) -> "SubpixelConfig":
         data = _as_mapping(raw)
-        directions_raw = _as_mapping(data.get("wand_directions", {}))
-        wand_directions: dict[int, Any] = {}
-        for key, value in directions_raw.items():
-            try:
-                wand_directions[int(key)] = value
-            except (TypeError, ValueError):
-                continue
+        # Gestiamo il typo 'subpixe_iter' presente nel tuo YAML
         return cls(
-            dictionary=str(data.get("dictionary", cls.dictionary)),
-            marker_size_mm=_coerce_float(data.get("marker_size_mm"), cls.marker_size_mm),
-            cube_size_mm=_coerce_float(data.get("cube_size_mm"), cls.cube_size_mm),
-            pair_strategy=str(data.get("pair_strategy", cls.pair_strategy)),
-            wand_offset_m=_coerce_float(data.get("wand_offset_m"), cls.wand_offset_m),
-            wand_directions=wand_directions,
-            marker_filter=MarkerFilterConfig.from_mapping(data.get("marker_filter", {})),
-        )
-
-
-@dataclass(frozen=True)
-class IcoPoseConfig:
-    """Configuration specific to the truncated icosahedron backend."""
-
-    dictionary: str = "4X4_50"
-    marker_size_mm: float = 21.0
-    transform_file: Optional[Path] = None
-    marker_filter: MarkerFilterConfig = field(default_factory=MarkerFilterConfig)
-
-    @classmethod
-    def from_mapping(cls, raw: Any) -> "IcoPoseConfig":
-        data = _as_mapping(raw)
-        transform_file = data.get("transform_file")
-        return cls(
-            dictionary=str(data.get("dictionary", cls.dictionary)),
-            marker_size_mm=_coerce_float(data.get("marker_size_mm"), cls.marker_size_mm),
-            transform_file=Path(transform_file) if transform_file else None,
-            marker_filter=MarkerFilterConfig.from_mapping(data.get("marker_filter", {})),
+            subpixel_iter=_coerce_int(data.get("subpixel_iter"), cls.subpixel_iter),
+            subpixel_eps=_coerce_float(data.get("subpixel_eps"), cls.subpixel_eps),
         )
 
 
 @dataclass(frozen=True)
 class PoseConfig:
-    """Configuration for the pose worker."""
-
+    """Configurazione generale per il sistema di posa."""
     enabled: bool = True
-    method: str = "cube"
-    max_parallel_jobs: int = 1
-    cube: CubePoseConfig = field(default_factory=CubePoseConfig)
-    ico: IcoPoseConfig = field(default_factory=IcoPoseConfig)
-    camera_calibration_npz: Optional[Path] = None
+    method: str = "ico"
+    max_parallel_jobs: int = 5
     save_overlay: bool = True
-    # AGGIUNGI QUESTO:
+    camera_calibration_npz: Optional[Path] = None
     extrinsic_matrix_json: Optional[Path] = None
+    ico: IcoPoseConfig = field(default_factory=IcoPoseConfig)
+    marker_filter_average: MarkerFilterConfig = field(default_factory=MarkerFilterConfig)
+    subpixel_config: SubpixelConfig = field(default_factory=SubpixelConfig)
 
     @classmethod
     def from_mapping(cls, raw: Any) -> "PoseConfig":
         data = _as_mapping(raw)
-        calibration = data.get("camera_calibration_npz")
-        # AGGIUNGI QUESTO:
-        extrinsics = data.get("extrinsic_matrix_json")
+        calib = data.get("camera_calibration_npz")
+        extrin = data.get("extrinsic_matrix_json")
         return cls(
             enabled=_coerce_bool(data.get("enabled"), cls.enabled),
             method=str(data.get("method", cls.method)),
-            max_parallel_jobs=_coerce_int(
-                data.get("max_parallel_jobs"), cls.max_parallel_jobs
-            ),
-            cube=CubePoseConfig.from_mapping(data.get("cube", {})),
-            ico=IcoPoseConfig.from_mapping(data.get("ico", {})),
-            camera_calibration_npz=Path(calibration) if calibration else None,
+            max_parallel_jobs=_coerce_int(data.get("max_parallel_jobs"), cls.max_parallel_jobs),
             save_overlay=_coerce_bool(data.get("save_overlay"), cls.save_overlay),
-            # AGGIUNGI QUESTO:
-            extrinsic_matrix_json=Path(extrinsics) if extrinsics else None,
+            camera_calibration_npz=Path(calib) if calib else None,
+            extrinsic_matrix_json=Path(extrin) if extrin else None,
+            ico=IcoPoseConfig.from_mapping(data.get("ico", {})),
+            marker_filter_average=MarkerFilterConfig.from_mapping(data.get("marker_filter_average", {})),
+            subpixel_config=SubpixelConfig.from_mapping(data.get("subpixel_config", {})),
         )
 
 
@@ -256,24 +225,32 @@ class AppConfig:
     pose: PoseConfig
     runtime: RuntimeConfig
     plot: PlotConfig
+    # Spostiamo marker_map qui: non ha un default "fisso" ma viene inizializzato nel from_mapping
+    marker_map: Mapping[int, str] 
+    # 'raw' deve essere l'ultimo perché ha un valore di default (field)
     raw: MutableMapping[str, Any] = field(repr=False)
 
     @classmethod
     def from_mapping(cls, raw: Mapping[str, Any]) -> "AppConfig":
+        """Crea la configurazione gestendo la conversione dei tipi dallo YAML."""
+        
+        # Gestione della marker_map dallo YAML
+        raw_map = _as_mapping(raw.get("marker_map", {}))
+        # Convertiamo le chiavi in interi per gli ID ArUco
+        processed_map = {int(k): str(v) for k, v in raw_map.items()}
+
         return cls(
             ble=BleConfig.from_mapping(raw.get("ble", {})),
             capture=CaptureConfig.from_mapping(raw.get("capture", {})),
             pose=PoseConfig.from_mapping(raw.get("pose", {})),
             runtime=RuntimeConfig.from_mapping(raw.get("runtime", {})),
             plot=PlotConfig.from_mapping(raw.get("plot", {})),
+            marker_map=processed_map,
             raw=dict(raw),
         )
 
     def as_dict(self) -> dict[str, Any]:
-        """Return a mutable mapping compatible with legacy helpers."""
-
         return dict(self.raw)
-
 
 @dataclass(frozen=True)
 class PoseStartMessage:
@@ -288,7 +265,6 @@ class PoseStartMessage:
     save_frames: bool
     save_dir: Optional[Path] = None
     action: Literal["start"] = "start"
-
 
 @dataclass(frozen=True)
 class PoseEndMessage:
@@ -305,7 +281,6 @@ class PoseEndMessage:
 
 
 PoseWorkerPayload: TypeAlias = Union[PoseStartMessage, PoseEndMessage]
-
 
 @dataclass
 class FramePacket:

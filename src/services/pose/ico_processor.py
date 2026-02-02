@@ -36,8 +36,7 @@ class IcoPoseProcessor:
         """
         pose_cfg = self.pose_cfg
         dict_name = pose_cfg.dictionary
-
-        #FIXME: SIAMO SICURI CHE LA CONVERSIONE è CORRETTA ?  
+ 
         # Conversione mm -> metri
         marker_size = float(pose_cfg.marker_size_mm) / 1000.0 
         
@@ -62,7 +61,6 @@ class IcoPoseProcessor:
             except Exception as e:
                 return ({"file": packet.filename, "ok": False, "reason": f"calib_load_err: {e}"}, None)
         
-        #TODO: descrivere il processo di scalig, cosa stiamo facendo e a che serve
         # B. Trasformazioni Faccia->Corpo (CORRETTO: NESSUNO SCALING)
         if self._cached_trans_path != str(transform_path):
             try:
@@ -76,7 +74,7 @@ class IcoPoseProcessor:
                 t_sample = self._transforms[first_key][:3, 3]
                 print(f"[ICO-LOAD] Loaded transforms. Sample ({first_key}) norm: {np.linalg.norm(t_sample):.4f}m")
                 # Se leggi ~0.058m qui, è PERFETTO.
-                # -------------
+                # ------------- 
 
                 self._cached_trans_path = str(transform_path)
             except Exception as e:
@@ -92,6 +90,7 @@ class IcoPoseProcessor:
                 aruco_dict=dict_name,
                 marker_size=marker_size,
                 return_overlay=True,
+                cfg=self.cfg
             )
             
         except ValueError as e:

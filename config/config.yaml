@@ -1,39 +1,78 @@
-﻿ble:
-  name_prefix: "ESP32-RGB-BLE"     # or use "addr" to connect directly to an address
-  addr: null                       # e.g. "44:1D:64:F4:AC:D2" on Linux/Mac, GUID on Windows
-  scan_timeout: 3.0                # seconds
+﻿ble:                                                                     # Parametri BLE    
+  name_prefix: "ESP32-RGB-BLE"                                           # or use "addr" to connect directly to an address
+  addr: null                                                             # e.g. "44:1D:64:F4:AC:D2" on Linux/Mac, GUID on Windows
+  scan_timeout: 3.0                                                      # Seconds
 
-capture:
-  frequency_ms: 100
-  output_root: "../captures"       # can also be in OneDrive; keeping it local is faster
-  save_frames: true                # when true, persist frames with pose overlays if available
-  frame_queue_size: 4             # max number of frames waiting in the in-memory stream
-  simulate_camera: true           # true = test mode (uses images from a folder)
-  camera_type: "opencv"            # "opencv" for webcam or "pylon" for basler.
-  camera_id: 0                     # webcam id (0 usually works)
-  camera_serial: 23324651          # serial number for industrial cameras
-  camera_ip: 192.168.1.165         # URL/IP for network cameras
-  test_source_dir: "../image_to_be_used"   # used if simulate_camera=true
+capture:                                                                 # Parametri di Acquisizione
+  frequency_ms: 100                                                      # Frequenza di Acquisizione del sistema (se impostata a livello di camera il parametro non fa nulla)
+  output_root: "../captures"                                             # Can also be in OneDrive; keeping it local is faster
+  save_frames: true                                                      # When true, persist frames with pose overlays if available
+  frame_queue_size: 4                                                    # Max number of frames waiting in the in-memory stream
+  simulate_camera: true                                                  # True = test mode (uses images from a folder)
+  camera_type: "opencv"                                                  # "opencv" for webcam or "pylon" for basler.
+  camera_id: 0                                                           # Webcam id (0 usually works)
+  camera_serial: 23324651                                                # Serial number for industrial cameras (pylon)
+  camera_ip: 192.168.1.165                                               # URL/IP for network cameras
+  test_source_dir: "../image_to_be_used"                                 # Used if simulate_camera=true
 
 pose:
-  radius_m: 0.05818
-  enabled: true
-  method: "ico"                   # "ico" | "custom"
-  max_parallel_jobs: 5             # 3 is fine (CPU permitting)
-  save_overlay: true               # save diagnostic overlays next to raw frames using *_overlay suffix
-  ico:
-    dictionary: "4X4_50"
-    marker_size_mm: 21.33
-    transform_file: ../calibration/transforms.json          # leave null to use built-in transforms
-  camera_calibration_npz: "../calibration/calib_data.npz"  # must contain 'camera_matrix' and 'dist_coeffs'
+  enabled: true                                                          # Abilitazione della stima della posa
+  method: "ico"                                                          # Solo "ico" supportato per ora
+  max_parallel_jobs: 5                                                   # 3 is fine (CPU permitting)
+  save_overlay: true                                                     # Save diagnostic overlays next to raw frames using *_overlay suffix
+  camera_calibration_npz: "../calibration/calib_data.npz"                # Deve contenere 'camera_matrix' and 'dist_coeffs'
+  extrinsic_matrix_json: "../calibration/robot_camera_extrinsics.json"   # File contenente la matrice 4x4 T_base_camera
+  ico:                                                                   # Regole che valgono per opzione "ico" --> icosaedro troncato 31 marrker su 32 facce
+    dictionary: "4X4_50"                                                 # Dizionario di riferimento per i marker
+    marker_size_mm: 21.33                                                # Dimensione dei marker
+    transform_file: ../calibration/transforms.json                       # Necessario per il calcolo del centro  sfera da marker
+    geo_radius: 0.061035                                                 # Raggio sfera (metri) per overlay. Calcolato da .cad
+    z_shift_tip: 0.20620                                                 # Distanza Centro Sfera -> Punta (metri). Variabile in base a oggetto punta. Calcolato da .cad
+  marker_filter_average:                                                 # Filtraggio dei marker e regole per pesatura
+    min_area: 100.0                                                        # Area minima in pixel
+    weight_exponent: 1.5                                                 # Esponente per pesatura area
+    outliers_threshold: 0.030                                            # Distanza massima dalla media prima di essere considerato outliers 
+  subpixel_config:                                                       # SubPixel rules sulla libreria opencv
+    subpixel_iter: 500                                                    # Iterazioni subpixel
+    subpixel_eps: 0.0001                                                   # Epsilon subpixel
 
-  # NUOVO PARAMETRO: File contenente la matrice 4x4 T_base_camera
-  extrinsic_matrix_json: "../calibration/robot_camera_extrinsics.json"
+runtime:                                                                 # Regole a runtime
+  debug: true                                                            # Extra Debug behavior
+  log_level: DEBUG                                                       # DEBUG, INFO, WARNING, ERROR
+  log_to_file: true                                                      # Write global app.log in addition to console
 
-runtime:
-  debug: true                      # extra debug behavior
-  log_level: DEBUG                 # DEBUG, INFO, WARNING, ERROR
-  log_to_file: true               # write global app.log in addition to console
+plot:                                                                    # Regole per plotting
+  default_pose_json: "../captures/session_2025-12-14_22-31-09_pose.json" # Jsonl utilizzato per il plotting
 
-plot:
-  default_pose_json: "../captures/session_2025-12-14_22-31-09_pose.json"
+marker_map:                                                              # Mapping marker to id aruco - H: esagono P: pentagono
+  1: "H5"
+  2: "H2"
+  3: "P0"
+  4: "H3"
+  5: "H0"
+  6: "H6"
+  7: "P2"
+  8: "P8"
+  9: "H4"
+  10: "H8" 
+  11: "P1"
+  12: "H9"
+  13: "P7"
+  14: "P6"
+  15: "H15" 
+  16: "P4"
+  17: "H1"
+  18: "H7"
+  19: "H14"
+  20: "H17"
+  21: "H19"
+  22: "P3"
+  23: "H13" 
+  24: "P11"
+  25: "P5"
+  26: "P10"
+  27: "H10"
+  28: "H16" 
+  29: "H11"
+  30: "H18"
+  31: "H12"

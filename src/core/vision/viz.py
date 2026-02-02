@@ -3,33 +3,6 @@ import cv2 as cv
 import numpy as np
 from typing import Tuple, List, Optional
 
-# Cache per i punti della sfera (evita di ricalcolarli a ogni frame)
-_SPHERE_CACHE = None
-
-def _get_sphere_geometry(radius: float, rings: int = 10, sectors: int = 10):
-    global _SPHERE_CACHE
-    if _SPHERE_CACHE is None or _SPHERE_CACHE[0] != radius:
-        points = []
-        lines_idx = []
-        for i in range(rings + 1):
-            theta = i * np.pi / rings 
-            for j in range(sectors):
-                phi = j * 2 * np.pi / sectors 
-                x = radius * np.sin(theta) * np.cos(phi)
-                y = radius * np.sin(theta) * np.sin(phi)
-                z = radius * np.cos(theta)
-                points.append([x, y, z])
-        points = np.array(points, dtype=np.float32)
-        for i in range(rings + 1):
-            base = i * sectors
-            for j in range(sectors):
-                lines_idx.append((base + j, base + (j + 1) % sectors))
-        for j in range(sectors):
-            for i in range(rings):
-                lines_idx.append((i * sectors + j, (i + 1) * sectors + j))
-        _SPHERE_CACHE = (radius, points, lines_idx)
-    return _SPHERE_CACHE[1], _SPHERE_CACHE[2]
-
 def draw_sphere_overlay(img: np.ndarray, K: np.ndarray, dist: np.ndarray, 
                         rvec: np.ndarray, tvec: np.ndarray, 
                         radius: float, 
@@ -56,6 +29,7 @@ def draw_sphere_overlay(img: np.ndarray, K: np.ndarray, dist: np.ndarray,
         cv.circle(overlay, (cx, cy), radius_px, color, -1)
         cv.addWeighted(overlay, alpha, output, 1 - alpha, 0, output)
         
+        """
         # Wireframe Sfera
         pts_3d, lines_idx = _get_sphere_geometry(radius)
         pts_2d, _ = cv.projectPoints(pts_3d, rvec, tvec, K, dist)
@@ -67,6 +41,7 @@ def draw_sphere_overlay(img: np.ndarray, K: np.ndarray, dist: np.ndarray,
             pt2 = tuple(pts_2d[p2_idx])
             if (0 <= pt1[0] < w and 0 <= pt1[1] < h) or (0 <= pt2[0] < w and 0 <= pt2[1] < h):
                 cv.line(output, pt1, pt2, line_color, 1, cv.LINE_AA)
+        """
 
         # --- Disegno ASSI (usa tvec_axes se esiste) ---
         target_tvec = tvec_axes if tvec_axes is not None else tvec
@@ -130,15 +105,6 @@ def draw_detected_markers(img: np.ndarray, detections, poses, K, dist, size,
             draw_center_point(green_centers[i], (0, 255, 0))
 
     return out
-
-
-# pc/app/algo/viz.py
-import cv2 as cv
-import numpy as np
-from typing import Tuple, List, Optional
-
-# ... _get_sphere_geometry e draw_sphere_overlay rimangono invariati ...
-# ... (assicurati solo che draw_sphere_overlay restituisca l'immagine modificata) ...
 
 def draw_large_axes(img: np.ndarray, K: np.ndarray, dist: np.ndarray, 
                     rvec: np.ndarray, tvec: np.ndarray, scale: float = 1.0):

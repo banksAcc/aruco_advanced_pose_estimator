@@ -247,7 +247,6 @@ class SessionManager:
             session.start()
             state_logger.info("Capture session STARTED")
 
-            #TODO: capire cosa fa partire il calcolo della posa in fase di caquisizione, deve partire dopo la fine acquizizione  
             if self.cfg.pose.enabled: 
                 pose_job = PoseStartMessage(
                     session_key=session.start_dt.isoformat(),
@@ -328,4 +327,3 @@ class SessionManager:
         await self.stop_session(reason="shutdown")
         async with self.lock:
             self._release_capturer()
-

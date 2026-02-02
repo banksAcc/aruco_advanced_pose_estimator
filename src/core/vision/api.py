@@ -7,26 +7,7 @@ from .detect import detect_markers
 from .pnp import estimate_marker_poses
 from ..geometry.geometry import average_poses, quat_from_R
 from .viz import draw_sphere_overlay, draw_detected_markers_with_projection, draw_large_axes
-
-# --- CONFIGURAZIONE DEFAULT (Da spostare in JSON/YAML) ---
-# Parametri geometrici utensile
-GEO_RADIUS = 0.05818      # Raggio sfera (metri)
-Z_SHIFT_TIP = 0.20620     # Distanza Centro Sfera -> Punta (metri)
-
-# Parametri algoritmi
-MIN_MARKER_AREA = 100.0   # Area minima in pixel
-SUBPIX_ITER = 500         # Iterazioni subpixel
-SUBPIX_EPS = 0.0001       # Epsilon subpixel
-WEIGHT_EXPONENT = 1.5     # Esponente per pesatura area
-OUTLIERS_THRESHOLD = 0.030
-
-DEFAULT_MARKER_MAP = {
-    1: "H5", 2: "H2", 3: "P0", 4: "H3", 5: "H0", 6: "H6", 7: "P2", 8: "P8", 
-    10: "H8", 9: "H4", 11: "P1", 12: "H9", 13: "P7", 14: "P6", 15: "H15", 
-    16: "P4", 17: "H1", 18: "H7", 19: "H14", 20: "H17", 21: "H19", 22: "P3", 
-    23: "H13", 24: "P11", 25: "P5", 26: "P10", 27: "H10", 28: "H16", 
-    29: "H11", 30: "H18", 31: "H12",
-}
+from utils.config_models import AppConfig
 
 def transform_to_robot_base(T_cam_obj: np.ndarray, T_base_cam: Optional[np.ndarray]) -> np.ndarray:
     """
@@ -44,9 +25,9 @@ def estimate_truncated_ico_from_image(
     transforms: Mapping[str, np.ndarray], # Map: FaceID -> T_face_body
     aruco_dict: str,
     marker_size: float,
+    cfg: AppConfig,
     T_base_cam: Optional[np.ndarray] = None, # Nuova: Estrinseca Robot
     return_overlay: bool = False,
-    marker_map: Dict[int, str] = DEFAULT_MARKER_MAP,
 ) -> Dict[str, Any]:
 
     # =========================================================================
@@ -56,14 +37,14 @@ def estimate_truncated_ico_from_image(
     
     if detections:
         gray = cv.cvtColor(image, cv.COLOR_BGR2GRAY)
-        criteria = (cv.TERM_CRITERIA_EPS + cv.TERM_CRITERIA_MAX_ITER, SUBPIX_ITER, SUBPIX_EPS)
+        criteria = (cv.TERM_CRITERIA_EPS + cv.TERM_CRITERIA_MAX_ITER, cfg.pose.subpixel_config.subpixel_iter, cfg.pose.subpixel_config.subpixel_eps)
         for det in detections:
             cv.cornerSubPix(gray, det.corners, (5, 5), (-1, -1), criteria)
 
     # =========================================================================
     # 2. FILTRO AREA
     # =========================================================================
-    valid_detections = [d for d in detections if d.area_px >= MIN_MARKER_AREA]
+    valid_detections = [d for d in detections if d.area_px >= cfg.pose.marker_filter_average.min_area]
     
     if not valid_detections:
         raise ValueError("Nessun marker valido trovato (Filtro Area).")
@@ -89,7 +70,7 @@ def estimate_truncated_ico_from_image(
     markers_debug_info = []
 
     for det, m_pose in zip(valid_detections, poses):
-        face_id = marker_map.get(det.id)
+        face_id = cfg.marker_map.get(det.id)
         
         # Saltiamo marker non mappati o senza trasformazione geometrica nota
         if not face_id or face_id not in transforms:
@@ -136,8 +117,8 @@ def estimate_truncated_ico_from_image(
     T_cam_sphere_avg, inlier_indices= average_poses(
         sphere_candidates_cam, 
         weights=weights,
-        weight_exponent=WEIGHT_EXPONENT,
-        outlier_distance_threshold=OUTLIERS_THRESHOLD # Esempio: scarta se > 2cm dalla media
+        weight_exponent= cfg.pose.marker_filter_average.weight_exponent,
+        outlier_distance_threshold= cfg.pose.marker_filter_average.outliers_threshold # Esempio: scarta se > 2cm dalla media
     )
 
     # =========================================================================
@@ -153,7 +134,7 @@ def estimate_truncated_ico_from_image(
     # Calcolo posizione punta: Centro - (AsseZ * Distanza)
     # Nota: Il segno dipende da come è definito il frame 'Body' nel JSON.
     # Assumiamo che la punta sia lungo -Z rispetto al centro, come nel codice originale.
-    t_tip_cam = t_sphere_avg - (local_z_axis * Z_SHIFT_TIP)
+    t_tip_cam = t_sphere_avg - (local_z_axis * cfg.pose.ico.z_shift_tip)
     
     # Costruiamo la matrice completa per la punta (stessa rotazione del corpo)
     T_cam_tip = np.eye(4)
@@ -192,9 +173,7 @@ def estimate_truncated_ico_from_image(
             # Verifichiamo se questo marker (indice i) è un inlier
             is_inlier_list.append(i in inlier_indices)
 
-        # 1. Disegno Base: Marker + Linee Proiezione (con distinzione Inlier/Outlier)
-        from .viz import draw_detected_markers_with_projection, draw_large_axes
-        
+        # 1. Disegno Base: Marker + Linee Proiezione (con distinzione Inlier/Outlier)        
         # Recuperiamo solo le detection e le pose effettivamente mappate (presenti in debug_info)
         mapped_detections = [m["detection"] for m in markers_debug_info]
         mapped_poses = [poses[valid_detections.index(m["detection"])] for m in markers_debug_info]
@@ -216,7 +195,7 @@ def estimate_truncated_ico_from_image(
             debug_img, K, dist,
             rvec=rvec_sphere_cam,
             tvec=T_cam_sphere_avg[:3, 3],
-            radius=GEO_RADIUS,
+            radius= cfg.pose.ico.geo_radius,
             color=(0, 0, 255),
             alpha=0.15,
             tvec_axes=None # Rimuoviamo assi dal centro sfera per pulizia
