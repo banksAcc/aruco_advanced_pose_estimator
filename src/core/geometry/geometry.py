@@ -70,10 +70,10 @@ def average_poses(
     weights: Optional[List[float]] = None,
     weight_exponent: float = 2.0,
     outlier_distance_threshold: Optional[float] = None
-) -> np.ndarray:
+) -> Tuple[np.ndarray, List[int]]:
     """
     Calcola la media pesata delle pose rimuovendo gli outlier.
-    NON gestisce più la logica di flip/ambiguità.
+    Restituisce (Posa_Media, Indici_Inlier).
     """
     n = len(poses_4x4)
     if n == 0:
@@ -102,6 +102,7 @@ def average_poses(
     
     final_poses = []
     final_weights = []
+    inlier_indices = []
 
     for i in range(n):
         pose = poses_4x4[i]
@@ -113,6 +114,7 @@ def average_poses(
         if dist <= outlier_distance_threshold:
             final_poses.append(pose)
             final_weights.append(w)
+            inlier_indices.append(i) # <--- Segna come inlier
         else:
             print(f"  > Dropped marker {i} (Dist: {dist:.3f})")
 
@@ -120,9 +122,9 @@ def average_poses(
     if not final_poses:
         # Se abbiamo scartato tutto (troppo restrittivi), torniamo la media iniziale come fallback
         print("  [AVG] WARNING: All markers rejected. Returning initial mean.")
-        return T_initial
+        return T_initial, list(range(n)) # Tutti inlier come fallback
 
     # Ricalcoliamo la media solo con i marker "buoni"
     T_final = _compute_mean_pose(final_poses, np.array(final_weights))
     
-    return T_final
+    return T_final, inlier_indices

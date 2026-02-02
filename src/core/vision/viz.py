@@ -155,25 +155,37 @@ def draw_detected_markers_with_projection(
     K, 
     dist, 
     marker_size,
-    projections: List[Optional[np.ndarray]] = None
+    projections: List[Optional[np.ndarray]] = None,
+    inliers: List[bool] = None # <-- Nuovo parametro
 ):
     """
     Disegna:
-    1. Box del marker (Giallo)
+    1. Box del marker (Verde se inlier, Rosso se outlier)
     2. Centro del marker (Punto Blu)
     3. Linea di collegamento: Centro Marker -> Centro Sfera Proiettato (Ghost)
-    4. Centro Sfera Proiettato (Pallino Ciano)
+    4. Centro Sfera Proiettato (Pallino Ciano se inlier, Grigio se outlier)
     
     NON disegna assi RGB sui marker.
     """
     out = img.copy()
     if projections is None:
         projections = [None] * len(detections)
+    
+    # Se non fornito, assumiamo siano tutti inlier per default
+    if inliers is None:
+        inliers = [True] * len(detections)
 
-    for det, pose, proj_tvec in zip(detections, poses, projections):
-        # 1. Box Marker (Giallo)
+    for i, (det, pose, proj_tvec) in enumerate(zip(detections, poses, projections)):
+        # Determina il colore in base allo stato di inlier
+        is_inlier = inliers[i]
+        # Verde per inlier, Rosso per outlier
+        color_main = (0, 255, 0) if is_inlier else (0, 0, 255)
+        # Ciano per inlier, Grigio scuro per outlier
+        color_ghost = (255, 255, 0) if is_inlier else (100, 100, 100)
+        
+        # 1. Box Marker
         pts = det.corners.reshape((-1, 1, 2)).astype(np.int32)
-        cv.polylines(out, [pts], True, (0, 255, 255), 2)
+        cv.polylines(out, [pts], True, color_main, 2)
         
         # Calcolo centro 2D del marker
         marker_center_2d = np.mean(det.corners, axis=0).astype(int)
@@ -184,16 +196,22 @@ def draw_detected_markers_with_projection(
 
         # Se abbiamo la proiezione del centro sfera (Ghost)
         if proj_tvec is not None:
-            # Proiezione 3D -> 2D del ghost center
             ghost_2d, _ = cv.projectPoints(proj_tvec.reshape(1, 1, 3), 
                                            np.zeros(3), np.zeros(3), 
                                            K, dist)
             gx, gy = ghost_2d[0].ravel().astype(int)
             
-            # 3. Linea di collegamento (Marker -> Ghost) - Ciano sottile
-            cv.line(out, (cx_m, cy_m), (gx, gy), (255, 255, 0), 1, cv.LINE_AA)
+            # 3. Linea di collegamento (Marker -> Ghost)
+            # Usiamo uno spessore maggiore per gli outlier per evidenziarli
+            thickness = 1 if is_inlier else 2
+            cv.line(out, (cx_m, cy_m), (gx, gy), color_ghost, thickness, cv.LINE_AA)
             
-            # 4. Pallino sul Ghost Center - Ciano
-            cv.circle(out, (gx, gy), 4, (255, 255, 0), -1)
+            # 4. Pallino sul Ghost Center
+            cv.circle(out, (gx, gy), 4, color_ghost, -1)
+            
+            # Opzionale: Aggiungi etichetta "OUTLIER" se scartato
+            if not is_inlier:
+                cv.putText(out, "OUTLIER", (cx_m, cy_m - 10), 
+                           cv.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
             
     return out

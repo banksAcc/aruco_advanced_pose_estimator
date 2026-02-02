@@ -6,7 +6,7 @@ import cv2 as cv
 from .detect import detect_markers
 from .pnp import estimate_marker_poses
 from ..geometry.geometry import average_poses, quat_from_R
-from .viz import draw_sphere_overlay, draw_detected_markers
+from .viz import draw_sphere_overlay, draw_detected_markers_with_projection, draw_large_axes
 
 # --- CONFIGURAZIONE DEFAULT (Da spostare in JSON/YAML) ---
 # Parametri geometrici utensile
@@ -133,7 +133,7 @@ def estimate_truncated_ico_from_image(
     # =========================================================================
     # average_poses rimuove outlier e calcola la media robusta
     # Output: T_cam_sphere_avg (Posa media del centro sfera rispetto alla camera)
-    T_cam_sphere_avg = average_poses(
+    T_cam_sphere_avg, inlier_indices= average_poses(
         sphere_candidates_cam, 
         weights=weights,
         weight_exponent=WEIGHT_EXPONENT,
@@ -180,32 +180,34 @@ def estimate_truncated_ico_from_image(
     overlay_img = None
     if return_overlay:
         
-        # Prepariamo la lista delle proiezioni (i "Ghost Centers")
-        # Estrarre solo i tvec dai dati di debug
+        # Prepariamo le liste per la funzione di disegno
         ghost_projections = []
-        for det in valid_detections:
-            # Cerchiamo il ghost corrispondente a questa detection
-            found = False
-            for info in markers_debug_info:
-                if info["detection"] is det:
-                    ghost_projections.append(info["T_cam_candidate"][:3, 3])
-                    found = True
-                    break
-            if not found:
-                ghost_projections.append(None)
+        is_inlier_list = []
 
-        # 1. Disegno Base: Marker + Linee Proiezione
-        # Usiamo la nuova funzione creata in viz.py
-        from .viz import draw_detected_markers_with_projection, draw_large_axes # Importa le nuove funzioni
+        # Usiamo enumerate per avere l'indice 'i' corretto da confrontare con inlier_indices
+        for i, info in enumerate(markers_debug_info):
+            # Estraiamo il tvec del candidato centro sfera (Ghost)
+            ghost_projections.append(info["T_cam_candidate"][:3, 3])
+            
+            # Verifichiamo se questo marker (indice i) è un inlier
+            is_inlier_list.append(i in inlier_indices)
+
+        # 1. Disegno Base: Marker + Linee Proiezione (con distinzione Inlier/Outlier)
+        from .viz import draw_detected_markers_with_projection, draw_large_axes
         
+        # Recuperiamo solo le detection e le pose effettivamente mappate (presenti in debug_info)
+        mapped_detections = [m["detection"] for m in markers_debug_info]
+        mapped_poses = [poses[valid_detections.index(m["detection"])] for m in markers_debug_info]
+
         debug_img = draw_detected_markers_with_projection(
             image, 
-            valid_detections, 
-            poses, 
+            mapped_detections, 
+            mapped_poses, 
             K, 
             dist, 
             marker_size,
-            projections=ghost_projections
+            projections=ghost_projections,
+            inliers=is_inlier_list
         )
         
         # 2. SFERA MEDIA (Rosso trasparente) - Solo volume e wireframe
