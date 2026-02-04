@@ -1,5 +1,9 @@
 ﻿# BLE-Aruco Stylus Tracker: 6DOF Pose Estimation System
 
+![Version](https://img.shields.io/badge/version-1.0.0-blue)
+![License](https://img.shields.io/badge/license-All%20Rights%20Reserved-red)
+![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey)
+
 Sistema integrato per la stima della posa a 6 gradi di libertà (6DOF) di uno stilo basato su **icosaedro troncato**, con attivazione remota via **BLE** e pipeline di visione industriale **Basler**.
 <p align="center">
 <img src="src\debug\frame_000011_20260204_223833_overlay.png" alt="L'output del sistema" height="400">
