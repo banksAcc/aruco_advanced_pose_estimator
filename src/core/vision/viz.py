@@ -114,6 +114,10 @@ def draw_large_axes(img: np.ndarray, K: np.ndarray, dist: np.ndarray,
     cv.drawFrameAxes(img, K, dist, rvec, tvec, length, 4) # Spessore 4
     return img
 
+from typing import List, Optional, Union
+import numpy as np
+import cv2 as cv
+
 def draw_detected_markers_with_projection(
     img: np.ndarray, 
     detections, 
@@ -122,62 +126,71 @@ def draw_detected_markers_with_projection(
     dist, 
     marker_size,
     projections: List[Optional[np.ndarray]] = None,
-    inliers: List[bool] = None # <-- Nuovo parametro
+    statuses: List[str] = None # Riceve "inlier", "outlier" o "tilted"
 ):
     """
-    Disegna:
-    1. Box del marker (Verde se inlier, Rosso se outlier)
-    2. Centro del marker (Punto Blu)
-    3. Linea di collegamento: Centro Marker -> Centro Sfera Proiettato (Ghost)
-    4. Centro Sfera Proiettato (Pallino Ciano se inlier, Grigio se outlier)
-    
-    NON disegna assi RGB sui marker.
+    Disegna il feedback visivo dei marker con codifica a colori:
+    - GREEN: Inlier (utilizzato per la media)
+    - YELLOW: Tilted (scartato per inclinazione eccessiva)
+    - RED: Outlier (scartato per distanza euclidea)
     """
     out = img.copy()
-    if projections is None:
-        projections = [None] * len(detections)
+    n = len(detections)
     
-    # Se non fornito, assumiamo siano tutti inlier per default
-    if inliers is None:
-        inliers = [True] * len(detections)
+    if projections is None:
+        projections = [None] * n
+    
+    # Fallback se lo stato non è fornito
+    if statuses is None:
+        statuses = ["inlier"] * n
 
     for i, (det, pose, proj_tvec) in enumerate(zip(detections, poses, projections)):
-        # Determina il colore in base allo stato di inlier
-        is_inlier = inliers[i]
-        # Verde per inlier, Rosso per outlier
-        color_main = (0, 255, 0) if is_inlier else (0, 0, 255)
-        # Ciano per inlier, Grigio scuro per outlier
-        color_ghost = (255, 255, 0) if is_inlier else (100, 100, 100)
+        status = statuses[i]
+        
+        # --- DEFINIZIONE LOGICA COLORI ---
+        if status == "inlier":
+            color_main = (0, 255, 0)      # Verde
+            color_ghost = (255, 255, 0)   # Ciano
+            label = None
+        elif status == "tilted":
+            color_main = (0, 255, 255)    # Giallo
+            color_ghost = (100, 100, 100) # Grigio
+            label = "TILTED"
+        else: # status == "outlier"
+            color_main = (0, 0, 255)      # Rosso
+            color_ghost = (100, 100, 100) # Grigio
+            label = "OUTLIER"
         
         # 1. Box Marker
         pts = det.corners.reshape((-1, 1, 2)).astype(np.int32)
         cv.polylines(out, [pts], True, color_main, 2)
         
-        # Calcolo centro 2D del marker
+        # Calcolo centro 2D del marker per testi e linee
         marker_center_2d = np.mean(det.corners, axis=0).astype(int)
         cx_m, cy_m = marker_center_2d[0], marker_center_2d[1]
         
-        # 2. Pallino sul Marker (Blu scuro)
+        # 2. Pallino sul Marker (Blu scuro per contrasto)
         cv.circle(out, (cx_m, cy_m), 4, (255, 0, 0), -1)
 
-        # Se abbiamo la proiezione del centro sfera (Ghost)
+        # 3. Gestione Scritte (Label)
+        if label:
+            # Testo leggermente sopra il marker
+            cv.putText(out, label, (cx_m - 20, cy_m - 15), 
+                       cv.FONT_HERSHEY_SIMPLEX, 0.5, color_main, 2, cv.LINE_AA)
+
+        # 4. Proiezione del centro sfera (Ghost)
         if proj_tvec is not None:
             ghost_2d, _ = cv.projectPoints(proj_tvec.reshape(1, 1, 3), 
                                            np.zeros(3), np.zeros(3), 
                                            K, dist)
             gx, gy = ghost_2d[0].ravel().astype(int)
             
-            # 3. Linea di collegamento (Marker -> Ghost)
-            # Usiamo uno spessore maggiore per gli outlier per evidenziarli
-            thickness = 1 if is_inlier else 2
+            # Linea di collegamento (Marker -> Ghost)
+            # Linea tratteggiata simulata o spessore diverso per gli scarti
+            thickness = 1 if status == "inlier" else 2
             cv.line(out, (cx_m, cy_m), (gx, gy), color_ghost, thickness, cv.LINE_AA)
             
-            # 4. Pallino sul Ghost Center
+            # Pallino sul Ghost Center
             cv.circle(out, (gx, gy), 4, color_ghost, -1)
-            
-            # Opzionale: Aggiungi etichetta "OUTLIER" se scartato
-            if not is_inlier:
-                cv.putText(out, "OUTLIER", (cx_m, cy_m - 10), 
-                           cv.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
             
     return out

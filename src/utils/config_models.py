@@ -140,6 +140,7 @@ class MarkerFilterConfig:
     min_area: float = 100.0
     weight_exponent: float = 1.5
     outliers_threshold: float = 0.030
+    max_angle_deg: float = 80.0
 
     @classmethod
     def from_mapping(cls, raw: Any) -> "MarkerFilterConfig":
@@ -148,6 +149,7 @@ class MarkerFilterConfig:
             min_area=_coerce_float(data.get("min_area"), cls.min_area),
             weight_exponent=_coerce_float(data.get("weight_exponent"), cls.weight_exponent),
             outliers_threshold=_coerce_float(data.get("outliers_threshold"), cls.outliers_threshold),
+            max_angle_deg=_coerce_float(data.get("max_angle_deg"), cls.max_angle_deg),
         )
 
 @dataclass(frozen=True)

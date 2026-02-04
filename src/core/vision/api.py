@@ -108,12 +108,13 @@ def estimate_truncated_ico_from_image(
     # =========================================================================
     # average_poses rimuove outlier e calcola la media robusta
     # Output: T_cam_sphere_avg (Posa media del centro sfera rispetto alla camera)
-    T_cam_sphere_avg, inlier_indices= average_poses(
+    T_cam_sphere_avg, inlier_indices, tilted_indices = average_poses(
         sphere_candidates_cam,
         marker_rotations= marker_rotations_for_filter,
         weights=weights,
         weight_exponent= cfg.pose.marker_filter_average.weight_exponent,
-        outlier_distance_threshold= cfg.pose.marker_filter_average.outliers_threshold # Esempio: scarta se > 2cm dalla media
+        outlier_distance_threshold= cfg.pose.marker_filter_average.outliers_threshold, # Esempio: scarta se > 2cm dalla media
+        max_angle_deg= cfg.pose.marker_filter_average.max_angle_deg # Esempio: scarta se > 80 gradi rispetto piano camere
     )
 
     # =========================================================================
@@ -171,18 +172,23 @@ def estimate_truncated_ico_from_image(
         
         # Prepariamo le liste per la funzione di disegno
         ghost_projections = []
-        is_inlier_list = []
+        marker_statuses = [] # <--- Sostituisce is_inlier_list
 
-        # Usiamo enumerate per avere l'indice 'i' corretto da confrontare con inlier_indices
+        # Usiamo enumerate per avere l'indice 'i' corretto
         for i, info in enumerate(markers_debug_info):
-            # Estraiamo il tvec del candidato centro sfera (Ghost)
             ghost_projections.append(info["T_cam_candidate"][:3, 3])
             
-            # Verifichiamo se questo marker (indice i) è un inlier
-            is_inlier_list.append(i in inlier_indices)
+            # Determiniamo lo stato del marker per il colore
+            if i in inlier_indices:
+                status = "inlier"    # Verde (Buono)
+            elif i in tilted_indices:
+                status = "tilted"    # Giallo (Troppo inclinato)
+            else:
+                status = "outlier"   # Rosso (Lontano dalla media)
+            
+            marker_statuses.append(status)
 
-        # 1. Disegno Base: Marker + Linee Proiezione (con distinzione Inlier/Outlier)        
-        # Recuperiamo solo le detection e le pose effettivamente mappate (presenti in debug_info)
+        # 1. Disegno Base: Marker + Linee Proiezione con gestione stati
         mapped_detections = [m["detection"] for m in markers_debug_info]
         mapped_poses = [poses[valid_detections.index(m["detection"])] for m in markers_debug_info]
 
@@ -194,9 +200,9 @@ def estimate_truncated_ico_from_image(
             dist, 
             marker_size,
             projections=ghost_projections,
-            inliers=is_inlier_list
+            statuses=marker_statuses  # <--- Passiamo gli stati invece di inliers=is_inlier_list
         )
-        
+
         # 2. SFERA MEDIA (Rosso trasparente) - Solo volume e wireframe
         rvec_sphere_cam, _ = cv.Rodrigues(T_cam_sphere_avg[:3, :3])
         debug_img = draw_sphere_overlay(

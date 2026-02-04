@@ -44,6 +44,7 @@ pose:
     min_area: 100.0                                                      # Area minima in pixel
     weight_exponent: 1.5                                                 # Esponente per pesatura area
     outliers_threshold: 0.030                                            # Distanza massima dalla media prima di essere considerato outliers 
+    max_angle_deg: 60.0                                                  # Angolo di massima inclinazione, scarto i marker troppo inclinati
   subpixel_config:                                                       # SubPixel rules sulla libreria opencv
     subpixel_iter: 500                                                   # Iterazioni subpixel
     subpixel_eps: 0.0001                                                 # Epsilon subpixel
