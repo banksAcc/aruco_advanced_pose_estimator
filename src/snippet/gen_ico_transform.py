@@ -25,62 +25,12 @@ from utils.utils import load_config
 # Tipo di ArUco
 ARUCO_DICT = cv.aruco.DICT_4X4_50 
 
-# MAPPING: Faccia -> ID ArUco
-FACE_TO_ID = {
-    # --- Pentagoni (P) ---
-    "P0": 3,   "P1": 11,  "P2": 7,   "P3": 22,  "P4": 16,  "P5": 25,
-    "P6": 14,  "P7": 13,  "P8": 8,   "P10": 26, "P11": 24,
-    # P9 (Base)
-
-    # --- Esagoni (H) ---
-    "H0": 5,   "H1": 17,  "H2": 2,   "H3": 4,   "H4": 9,  "H5": 1,
-    "H6": 6,   "H7": 18,  "H8": 10,   "H9": 12,  "H10": 27, "H11": 29,
-    "H12": 31, "H13": 23, "H14": 19, "H15": 15, "H16": 28, "H17": 20,
-    "H18": 30, "H19": 21
-}
-
-# OFFSET MANUALI (Gradi Antiorari)
-# Esempio: "P0": 90 ruota il marker P0 di 90 gradi a sinistra.
-MANUAL_OFFSETS = {
-    "H11": 120,
-    "H12": -60,
-    "H18": -30,
-    "H16": -60,
-    "H10": -150,
-    "P5": -54,
-    "H13": 90,
-    "P11": 234,
-    "H14": 120,
-    "H19": 60,
-    "H1": 180,
-    "H7": -60,
-    "P7": -54,
-    "H9": -120,
-    "P3": -54,
-    "H17": 180,
-    "P10": -126,
-    "H8": -60,
-    "P1": -18,
-    "P2": 180,
-    "H4": -90,
-    "P8": -180,
-    "H6": -150,
-    "H5": 120,
-    "H15": -120,
-    "P4": 90,
-    "H0": 90,
-    "H3": 120,
-    "H2": 210,
-    "P0": 180,
-}
-
-EDGE_LENGTH_METERS = 0.025
 FILENAME = "transforms_final.json"
 
 # ==========================================
 # 2. HELPER GENERAZIONE ARUCO
 # ==========================================
-def get_aruco_bits(marker_id, dictionary_id=ARUCO_DICT):
+def get_aruco_bits(marker_id, dictionary_id = ARUCO_DICT):
     aruco_dict = cv.aruco.getPredefinedDictionary(dictionary_id)
     marker_bits = 4 + 2 
     img = cv.aruco.generateImageMarker(aruco_dict, marker_id, marker_bits)
@@ -107,6 +57,9 @@ def build_geometry_and_plot():
 
     print(f"Caricamento configurazione da ../config/config.yaml...")
     cfg = load_config(Path("../config/config.yaml"))
+
+    # Inverte la mappa caricata da YAML (da ID:Nome a Nome:ID)
+    name_to_id = {v: k for k, v in cfg.marker_map.items()}
 
     # --- Costruzione Icosaedro ---
     phi = (1 + np.sqrt(5)) / 2
@@ -151,7 +104,7 @@ def build_geometry_and_plot():
     R_align = rotation_matrix_from_vectors(p0_center, np.array([0,0,1]))
     u_verts = (R_align @ u_verts.T).T
     
-    scale = EDGE_LENGTH_METERS / np.linalg.norm(u_verts[pent_indices[0][0]] - u_verts[pent_indices[0][1]])
+    scale = cfg.build_icosahedron.edge_length / np.linalg.norm(u_verts[pent_indices[0][0]] - u_verts[pent_indices[0][1]])
     u_verts *= scale
 
     # --- VISUALIZZAZIONE ---
@@ -174,7 +127,7 @@ def build_geometry_and_plot():
             
             # Offset Manuale
             name = f"{prefix}{i}"
-            offset = MANUAL_OFFSETS.get(name, 0)
+            offset = cfg.build_icosahedron.manual_offsets.get(name, 0)
             R_off = rotation_matrix_z(offset)
             
             # Matrice Finale (Ruota gli assi X,Y sulla faccia)
@@ -195,21 +148,22 @@ def build_geometry_and_plot():
             ax.add_collection3d(poly)
             
             # Disegno Marker
-            marker_id = cfg.marker_map.get(name)
-                 
+            marker_id = name_to_id.get(name)
+            
             if marker_id is not None:
                 bits = get_aruco_bits(marker_id)
                 
                 # La rotazione ora è gestita interamente da T_final (X_F, Y_F)
                 
                 N = bits.shape[0]
-                marker_size = EDGE_LENGTH_METERS * 0.85
+                marker_size = cfg.build_icosahedron.edge_length * cfg.build_icosahedron.size_ratio
+                
                 step = marker_size / N
                 start_x = -marker_size / 2
                 start_y = marker_size / 2
                 
                 # Lift 2mm
-                epsilon = 0.002 * z_axis 
+                epsilon = cfg.build_icosahedron.lift_dist * z_axis 
                 
                 # Nuovi assi ruotati
                 X_F = T_final[:3, 0]
@@ -236,7 +190,7 @@ def build_geometry_and_plot():
                 ax.add_collection3d(coll)
 
                 # ID in BLU
-                txt_pos = center + z_axis * (EDGE_LENGTH_METERS * 1.0)
+                txt_pos = center + z_axis * (cfg.build_icosahedron.edge_length * 1.0)
                 ax.text(txt_pos[0], txt_pos[1], txt_pos[2], f"{marker_id}", 
                         ha='center', va='center', fontsize=9, color='blue', weight='bold') # <-- COLORE CAMBIATO
 

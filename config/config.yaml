@@ -56,6 +56,42 @@ runtime:                                                                 # Regol
 plot:                                                                    # Regole per plotting
   default_pose_json: "../captures/session_2026-02-03_17-53-40_pose.json" # Jsonl utilizzato per il plotting
 
+build_icosahedron:
+  edge_length: 0.025                                                     # Lunghezza del lato di ogni poligono (pentagono o esagono) espressa in metri.
+  size_ratio: 0.85                                                       # Rapporto tra la dimensione del marker ArUco e la dimensione della faccia che lo ospita.
+  lift_dist: 0.0025                                                      # Offset di 2 mm verso l'esterno lungo l'asse Z della faccia
+  manual_offsets:                                                        # OFFSET MANUALI (Gradi Antiorari)
+    H11: 120
+    H12: -60
+    H18: -30
+    H16: -60
+    H10: -150
+    P5: -54
+    H13: 90
+    P11: 234
+    H14: 120
+    H19: 60
+    H1: 180
+    H7: -60
+    P7: -54
+    H9: -120
+    P3: -54
+    H17: 180
+    P10: -126
+    H8: -60
+    P1: -18
+    P2: 180
+    H4: -90
+    P8: -180
+    H6: -150
+    H5: 120
+    H15: -120
+    P4: 90
+    H0: 90
+    H3: 120
+    H2: 210
+    P0: 180
+
 marker_map:                                                              # Mapping marker to id aruco - H: esagono P: pentagono
   1: "H5"
   2: "H2"

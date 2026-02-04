@@ -246,7 +246,22 @@ class PlotConfig:
         default_json = data.get("default_pose_json")
         return cls(default_pose_json=Path(default_json) if default_json else None)
 
+@dataclass(frozen=True)
+class IcosahedronConfig:
+    edge_length: float
+    size_ratio: float
+    lift_dist: float
+    manual_offsets: Mapping[str, float]
 
+    @classmethod
+    def from_mapping(cls, raw: Mapping[str, Any]) -> "IcosahedronConfig":
+        return cls(
+            edge_length=float(raw.get("edge_length", 0.025)),
+            size_ratio=float(raw.get("size_ratio", 0.85)),
+            lift_dist=float(raw.get("lift_dist", 0.002)),
+            manual_offsets=_as_mapping(raw.get("manual_offsets", {})),
+        )
+    
 @dataclass(frozen=True)
 class AppConfig:
     """Aggregated application configuration with strongly-typed sections."""
@@ -256,9 +271,8 @@ class AppConfig:
     pose: PoseConfig
     runtime: RuntimeConfig
     plot: PlotConfig
-    # Spostiamo marker_map qui: non ha un default "fisso" ma viene inizializzato nel from_mapping
+    build_icosahedron: IcosahedronConfig
     marker_map: Mapping[int, str] 
-    # 'raw' deve essere l'ultimo perché ha un valore di default (field)
     raw: MutableMapping[str, Any] = field(repr=False)
 
     @classmethod
@@ -276,6 +290,7 @@ class AppConfig:
             pose=PoseConfig.from_mapping(raw.get("pose", {})),
             runtime=RuntimeConfig.from_mapping(raw.get("runtime", {})),
             plot=PlotConfig.from_mapping(raw.get("plot", {})),
+            build_icosahedron=IcosahedronConfig.from_mapping(raw.get("build_icosahedron", {})),
             marker_map=processed_map,
             raw=dict(raw),
         )
