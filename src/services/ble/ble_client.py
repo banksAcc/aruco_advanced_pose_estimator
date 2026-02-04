@@ -20,12 +20,10 @@ from utils.utils import Encode_as_bytes
 if TYPE_CHECKING:  # pragma: no cover - typing helper
     from session_manager import SessionManager
 
-START_CMD = "START" 
-END_CMD = "END"  # user confirmed END
 
 log = get_logger("BLE")
 
-async def _on_notify(sender: int | object, data: bytearray, session_mgr: "SessionManager") -> None:
+async def _on_notify(sender: int | object, data: bytearray, session_mgr: "SessionManager", cfg: AppConfig) -> None:
     """
     Handle notifications from the BLE device.
     Nota: 'sender' in Bleak moderni è un oggetto Characteristic, non un int, 
@@ -33,9 +31,9 @@ async def _on_notify(sender: int | object, data: bytearray, session_mgr: "Sessio
     """
     msg = data.decode(errors="ignore").strip().upper()
     
-    if msg == START_CMD:
+    if msg == cfg.ble.message_at_grab_start:
         await session_mgr.handle_start_command()
-    elif msg in (END_CMD, "STOP"): # Gestione unificata stop
+    elif msg in (cfg.ble.message_at_grab_end, "STOP"): # Gestione unificata stop
         await session_mgr.handle_end_command()
     else:
         log.warning(f"Unknown message: {msg!r}")
@@ -70,10 +68,6 @@ async def run_ble_client(
         log.error("No address: exiting.")
         return
 
-    # UUIDs definiti qui per ora (da spostare in config come da tuo TODO)
-    NUS_TX_UUID = "6E400003-B5A3-F393-E0A9-E50E24DCCA9E"
-    NUS_RX_UUID = "6E400002-B5A3-F393-E0A9-E50E24DCCA9E"
-
     while True:
         try:
             log.info(f"Connecting to {address} ...")
@@ -87,12 +81,12 @@ async def run_ble_client(
                 # Definiamo un wrapper che rispetta la firma richiesta da Bleak (sender, data)
                 # ma che al suo interno ha accesso a 'session_mgr'
                 async def notification_handler(sender, data):
-                    await _on_notify(sender, data, session_mgr)
+                    await _on_notify(sender, data, session_mgr, cfg)
 
                 await session_mgr.on_ble_connected()
                 
                 # Passiamo il wrapper a start_notify
-                await client.start_notify(NUS_TX_UUID, notification_handler)
+                await client.start_notify(cfg.ble.nus_tx_uuid, notification_handler)
                 
                 # -----------------------------
 
@@ -106,7 +100,7 @@ async def run_ble_client(
                                 break
                             try:
                                 await client.write_gatt_char(
-                                    NUS_RX_UUID,
+                                    cfg.ble.nus_rx_uuid,
                                     msg.as_bytes(),
                                 )
                             except Exception as e:

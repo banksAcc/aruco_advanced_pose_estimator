@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Mapping, MutableMapping, Optional,  Literal, TypeAlias, Union
+from typing import Any, List, Mapping, MutableMapping, Optional,  Literal, TypeAlias, Union
 import asyncio
 from datetime import datetime
 import numpy as np
@@ -48,7 +48,13 @@ def _coerce_float(value: Any, default: float = 0.0) -> float:
 @dataclass(frozen=True)
 class BleConfig:
     """Configuration for BLE discovery and connection."""
-
+    
+    message_at_computation_start: str
+    message_at_computation_end: str
+    message_at_grab_start: str
+    message_at_grab_end: str
+    nus_tx_uuid: str
+    nus_rx_uuid: str
     name_prefix: str = "ESP32-RGB-BLE"
     addr: Optional[str] = None
     scan_timeout: float = 8.0
@@ -57,6 +63,12 @@ class BleConfig:
     def from_mapping(cls, raw: Any) -> "BleConfig":
         data = _as_mapping(raw)
         return cls(
+            message_at_computation_start=str(data.get("message_at_computation_start", "")),
+            message_at_computation_end=str(data.get("message_at_computation_end", "")),
+            message_at_grab_start=str(data.get("message_at_grab_start", "")),
+            message_at_grab_end=str(data.get("message_at_grab_end", "")),
+            nus_tx_uuid=str(data.get("nus_tx_uuid", "")),
+            nus_rx_uuid=str(data.get("nus_rx_uuid", "")),
             name_prefix=str(data.get("name_prefix", cls.name_prefix)),
             addr=data.get("addr") or None,
             scan_timeout=_coerce_float(data.get("scan_timeout"), cls.scan_timeout),
@@ -153,6 +165,26 @@ class SubpixelConfig:
             subpixel_eps=_coerce_float(data.get("subpixel_eps"), cls.subpixel_eps),
         )
 
+@dataclass(frozen=True)
+class ExtrinsicConfig:
+    trans_x_mm: float = 0.0
+    trans_y_mm: float = 0.0
+    trans_z_mm: float = 0.0
+    rot_phi_deg: float = 0.0
+    rot_theta_deg: float = 0.0
+    rot_psi_deg: float = 0.0
+
+    @classmethod
+    def from_mapping(cls, raw: Any) -> "ExtrinsicConfig":
+        data = _as_mapping(raw)
+        return cls(
+            trans_x_mm=float(data.get("trans_x_mm", 0.0)),
+            trans_y_mm=float(data.get("trans_y_mm", 0.0)),
+            trans_z_mm=float(data.get("trans_z_mm", 0.0)),
+            rot_phi_deg=float(data.get("rot_phi_deg", 0.0)),
+            rot_theta_deg=float(data.get("rot_theta_deg", 0.0)),
+            rot_psi_deg=float(data.get("rot_psi_deg", 0.0)),
+        )
 
 @dataclass(frozen=True)
 class PoseConfig:
@@ -162,7 +194,7 @@ class PoseConfig:
     max_parallel_jobs: int = 5
     save_overlay: bool = True
     camera_calibration_npz: Optional[Path] = None
-    extrinsic_matrix_json: Optional[Path] = None
+    extrinsic_calibration: ExtrinsicConfig = field(default_factory=ExtrinsicConfig)
     ico: IcoPoseConfig = field(default_factory=IcoPoseConfig)
     marker_filter_average: MarkerFilterConfig = field(default_factory=MarkerFilterConfig)
     subpixel_config: SubpixelConfig = field(default_factory=SubpixelConfig)
@@ -171,14 +203,13 @@ class PoseConfig:
     def from_mapping(cls, raw: Any) -> "PoseConfig":
         data = _as_mapping(raw)
         calib = data.get("camera_calibration_npz")
-        extrin = data.get("extrinsic_matrix_json")
         return cls(
             enabled=_coerce_bool(data.get("enabled"), cls.enabled),
             method=str(data.get("method", cls.method)),
             max_parallel_jobs=_coerce_int(data.get("max_parallel_jobs"), cls.max_parallel_jobs),
             save_overlay=_coerce_bool(data.get("save_overlay"), cls.save_overlay),
             camera_calibration_npz=Path(calib) if calib else None,
-            extrinsic_matrix_json=Path(extrin) if extrin else None,
+            extrinsic_calibration=ExtrinsicConfig.from_mapping(data.get("extrinsic_calibration", {})),
             ico=IcoPoseConfig.from_mapping(data.get("ico", {})),
             marker_filter_average=MarkerFilterConfig.from_mapping(data.get("marker_filter_average", {})),
             subpixel_config=SubpixelConfig.from_mapping(data.get("subpixel_config", {})),
@@ -299,3 +330,20 @@ class FramePacket:
 
         return datetime.fromtimestamp(self.timestamp).isoformat()
 
+
+@dataclass
+class SessionJob:
+    """Track state for an in-flight pose estimation session."""
+    key: str
+    frame_queue: asyncio.Queue[Optional[FramePacket]]
+    freq_ms: int
+    start_iso: str
+    results: dict[str, Any]
+    label: str
+    save_frames: bool
+    save_dir: Optional[Path] = None
+    save_overlay: bool = True
+    end_iso: Optional[str] = None
+    finished: asyncio.Event = field(default_factory=asyncio.Event)
+    task: Optional[asyncio.Task] = None
+    overlay_paths: List[Path] = field(default_factory=list)

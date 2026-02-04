@@ -1,62 +1,98 @@
 """
 Gestisce le trasformazioni di coordinate tra Camera e Base Robot.
 """
+from typing import Optional
 import numpy as np
 import cv2
 
-# Configurazione Hardcoded (o caricabile da config in futuro)
-# Unità: mm e gradi
-EXT_X_MM = 871.432
-EXT_Y_MM = -61.7029
-EXT_Z_MM = 760.249
-EXT_A_DEG = 149.045   # Z (Phi)
-EXT_B_DEG = 150.698   # Y (Theta)
-EXT_C_DEG = -90.0639  # Z (Psi)
+def get_base_to_camera_matrix(
+    x_mm: float,
+    y_mm: float,
+    z_mm: float,
+    phi_deg: float,
+    theta_deg: float,
+    psi_deg: float
+) -> np.ndarray:
+    """
+    Calcola la matrice estrinseca T_base_cam (4x4) usando i parametri forniti
+    e la convenzione di Eulero ZYZ (Phi, Theta, Psi).
 
-def get_base_to_camera_matrix() -> np.ndarray:
-    """Calcola la matrice estrinseca T_base_cam (4x4) usando Eulero ZYZ."""
-    # 1. mm -> metri
-    x = EXT_X_MM / 1000.0
-    y = EXT_Y_MM / 1000.0
-    z = EXT_Z_MM / 1000.0
+    Se chiamata senza argomenti, usa i valori di default definiti nel modulo.
+
+    Args:
+        x_mm, y_mm, z_mm: Traslazione in millimetri.
+        phi_deg:   1° rotazione attorno a Z (gradi).
+        theta_deg: 2° rotazione attorno a Y (gradi).
+        psi_deg:   3° rotazione attorno a Z (gradi).
+
+    Returns:
+        np.ndarray: Matrice 4x4 T_base_cam.
+    """
+# 1. Conversione mm -> metri
+    x = x_mm / 1000.0
+    y = y_mm / 1000.0
+    z = z_mm / 1000.0
     
-    # 2. Gradi -> Radianti
-    a = np.radians(EXT_A_DEG)
-    b = np.radians(EXT_B_DEG)
-    c = np.radians(EXT_C_DEG)
+    # 2. Conversione Gradi -> Radianti
+    phi   = np.radians(phi_deg)
+    theta = np.radians(theta_deg)
+    psi   = np.radians(psi_deg)
     
-    c_a, s_a = np.cos(a), np.sin(a)
-    c_b, s_b = np.cos(b), np.sin(b)
-    c_c, s_c = np.cos(c), np.sin(c)
+    # Precalcolo seni e coseni
+    c_phi, s_phi = np.cos(phi), np.sin(phi)
+    c_th,  s_th  = np.cos(theta), np.sin(theta)
+    c_psi, s_psi = np.cos(psi), np.sin(psi)
     
-    # R = Rz(a) * Ry(b) * Rz(c)
-    Rz_a = np.array([[c_a, -s_a, 0], [s_a, c_a, 0], [0, 0, 1]])
-    Ry_b = np.array([[c_b, 0, s_b], [0, 1, 0], [-s_b, 0, c_b]])
-    Rz_c = np.array([[c_c, -s_c, 0], [s_c, c_c, 0], [0, 0, 1]])
+    # Costruzione Matrici di Rotazione (Eulero ZYZ)
+    # R = Rz(phi) * Ry(theta) * Rz(psi)
     
-    R = Rz_a @ Ry_b @ Rz_c
+    Rz_phi = np.array([
+        [c_phi, -s_phi, 0], 
+        [s_phi,  c_phi, 0], 
+        [0,      0,     1]
+    ])
     
+    Ry_theta = np.array([
+        [c_th,  0, s_th], 
+        [0,     1, 0   ], 
+        [-s_th, 0, c_th]
+    ])
+    
+    Rz_psi = np.array([
+        [c_psi, -s_psi, 0], 
+        [s_psi,  c_psi, 0], 
+        [0,      0,     1]
+    ])
+    
+    # Rotazione finale
+    R = Rz_phi @ Ry_theta @ Rz_psi
+    
+    # Costruzione Matrice Omogenea 4x4
     T = np.eye(4)
     T[:3, :3] = R
     T[:3, 3] = [x, y, z]
+    
     return T
 
-def transform_camera_to_robot(rvec_cam: np.ndarray, tvec_cam: np.ndarray, T_base_cam: np.ndarray):
+def transform_camera_to_robot(
+    T_cam_obj: np.ndarray, 
+    T_base_cam: Optional[np.ndarray] = None
+) -> Optional[np.ndarray]:
     """
-    Converte una posa dal frame Camera al frame Robot Base.
-    Restituisce (rvec_robot, tvec_robot).
-    """
-    # Converti rvec/tvec in matrice 4x4
-    R_cam, _ = cv2.Rodrigues(rvec_cam)
-    T_cam_obj = np.eye(4)
-    T_cam_obj[:3, :3] = R_cam
-    T_cam_obj[:3, 3] = tvec_cam.flatten()
+    Converte una posa completa (Matrice 4x4) dal frame Camera al frame Robot Base.
     
-    # T_base_obj = T_base_cam * T_cam_obj
+    Args:
+        T_cam_obj: Posa dell'oggetto in coordinate Camera (4x4).
+        T_base_cam: Matrice di trasformazione Base -> Camera (4x4).
+                    Se None, la trasformazione non può essere calcolata.
+
+    Returns:
+        T_base_obj (4x4) se T_base_cam è valido, altrimenti None.
+    """
+    if T_base_cam is None:
+        return None
+
+    # Moltiplicazione matriciale diretta: Base = (Base->Cam) * (Cam->Obj)
     T_base_obj = T_base_cam @ T_cam_obj
     
-    # Estrai rvec/tvec
-    rvec_base, _ = cv2.Rodrigues(T_base_obj[:3, :3])
-    tvec_base = T_base_obj[:3, 3]
-    
-    return rvec_base.flatten(), tvec_base.flatten()
+    return T_base_obj

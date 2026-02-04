@@ -6,9 +6,9 @@ import asyncio
 import csv
 import json
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field
+from utils.config_models import SessionJob
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
+from typing import Any, Dict, Optional, Tuple, TYPE_CHECKING
 import numpy as np
 import cv2
 
@@ -24,8 +24,6 @@ from utils.config_models import (
 
 from utils.logger import get_logger
 from utils.utils import (
-    BLE_COMPUTATION_END,
-    BLE_COMPUTATION_START,
     Encode_as_bytes,
 )
 
@@ -33,24 +31,6 @@ from utils.config_models import FramePacket
 from .ico_processor import IcoPoseProcessor
 
 log = get_logger("POSE")
-
-@dataclass
-class SessionJob:
-    """Track state for an in-flight pose estimation session."""
-    key: str
-    frame_queue: asyncio.Queue[Optional[FramePacket]]
-    freq_ms: int
-    start_iso: str
-    results: dict[str, Any]
-    label: str
-    save_frames: bool
-    save_dir: Optional[Path] = None
-    save_overlay: bool = True
-    end_iso: Optional[str] = None
-    finished: asyncio.Event = field(default_factory=asyncio.Event)
-    task: Optional[asyncio.Task] = None
-    overlay_paths: List[Path] = field(default_factory=list)
-
 
 class PoseWorker:
     """Asynchronous worker that estimates ico pose for capture sessions."""
@@ -80,7 +60,14 @@ class PoseWorker:
         self.save_overlay = bool(cfg.pose.save_overlay)
         self.save_executor = ThreadPoolExecutor(max_workers=1)
         
-        self._T_base_cam: Optional[np.ndarray] = get_base_to_camera_matrix()
+        self._T_base_cam: Optional[np.ndarray] = get_base_to_camera_matrix(
+            cfg.pose.extrinsic_calibration.trans_x_mm,
+            cfg.pose.extrinsic_calibration.trans_y_mm,
+            cfg.pose.extrinsic_calibration.trans_z_mm,
+            cfg.pose.extrinsic_calibration.rot_phi_deg,
+            cfg.pose.extrinsic_calibration.rot_theta_deg,
+            cfg.pose.extrinsic_calibration.rot_psi_deg
+        )
 
         # Inizializziamo il processore delegato
         self.ico_processor = IcoPoseProcessor(cfg, self._T_base_cam)
@@ -181,7 +168,7 @@ class PoseWorker:
             self.sessions.pop(job.key, None)
 
     async def _consume_session(self, job: SessionJob) -> None:
-        self._notify_ble(BLE_COMPUTATION_START)
+        self._notify_ble(Encode_as_bytes(self.cfg.ble.message_at_computation_start))
         loop = asyncio.get_running_loop()
         try:
             await self._process_session_stream(job, loop)
@@ -194,7 +181,7 @@ class PoseWorker:
         finally:
             self._write_results(job)
             self._cleanup_frames(job)
-            self._notify_ble(BLE_COMPUTATION_END)
+            self._notify_ble(Encode_as_bytes(self.cfg.ble.message_at_computation_end))
 
     async def _process_session_stream(
         self, job: SessionJob, loop: asyncio.AbstractEventLoop
@@ -313,7 +300,7 @@ class PoseWorker:
                 },
                 None,
             )
-  
+    
     def _write_results(self, job: SessionJob) -> None:
         label = job.label
         
@@ -326,51 +313,62 @@ class PoseWorker:
         except Exception as exc:
             log.error(f"Failed to write pose results: {exc}")
 
-        # 2. CSV (SOLO POSA PUNTA ROBOT)
+        # 2. CSV COMPLETO (Tutti i dati dei frame)
         out_csv = self.output_root / f"{label}_pose.csv"
         try:
             with out_csv.open("w", encoding="utf-8", newline="") as f:
                 writer = csv.writer(f)
                 
-                # HEADER SEMPLIFICATO
-                # Salviamo solo ciò che serve al robot
+                # HEADER COMPLETO
                 headers = [
-                    "frame_index", "timestamp", "ok", "num_markers",
-                    "x_tip_robot", "y_tip_robot", "z_tip_robot", 
-                    "rx_tip_robot", "ry_tip_robot", "rz_tip_robot"
+                    "frame_index", "timestamp", "file", "ok", 
+                    "num_markers", "num_outliers", "reproj_err",
+                    "dist_cam", "dist_robot",
+                    "tx_cam", "ty_cam", "tz_cam", 
+                    "rx_cam", "ry_cam", "rz_cam",
+                    "tx_robot", "ty_robot", "tz_robot", 
+                    "rx_robot", "ry_robot", "rz_robot",
+                    "overlay_file"
                 ]
                 writer.writerow(headers)
 
                 for idx, frame in enumerate(job.results.get("frames", []), start=1):
-                    ok = frame.get("ok", False)
-                    num_mk = frame.get("num_markers", 0)
-                    ts = frame.get("timestamp", "")
+                    # Estrazione dati con fallback sicuri
+                    t_cam = frame.get("tvec") or [None]*3
+                    r_cam = frame.get("rvec") or [None]*3
+                    t_rob = frame.get("tvec_robot") or [None]*3
+                    r_rob = frame.get("rvec_robot") or [None]*3
 
-                    # Prendiamo SOLO i dati trasformati (Punta in Base Robot)
-                    # Questi vengono calcolati in _process_ico_frame
-                    tvec = frame.get("tvec_robot", [None]*3)
-                    rvec = frame.get("rvec_robot", [None]*3)
-
-                    # Gestione sicurezza se i dati sono None (es. frame perso)
-                    if tvec is None: tvec = [None]*3
-                    if rvec is None: rvec = [None]*3
-
-                    # Formattazione a 6 decimali per precisione
-                    def fmt(val):
-                        return f"{val:.6f}" if val is not None else ""
+                    # Helper per formattazione numerica
+                    def fmt(val, precision=6):
+                        if val is None: return ""
+                        try:
+                            return f"{val:.{precision}f}"
+                        except (ValueError, TypeError):
+                            return str(val)
 
                     row = [
-                        idx, 
-                        ts, 
-                        ok, 
-                        num_mk,
-                        # Coordinate Punta
-                        fmt(tvec[0]), fmt(tvec[1]), fmt(tvec[2]),
-                        fmt(rvec[0]), fmt(rvec[1]), fmt(rvec[2]),
+                        idx,
+                        frame.get("timestamp", ""),
+                        frame.get("file", ""),
+                        frame.get("ok", False),
+                        frame.get("num_markers", 0),
+                        frame.get("num_outliers", 0),
+                        fmt(frame.get("reproj_err")),
+                        fmt(frame.get("dist_cam")),
+                        fmt(frame.get("dist_robot")),
+                        # Pose Camera
+                        fmt(t_cam[0]), fmt(t_cam[1]), fmt(t_cam[2]),
+                        fmt(r_cam[0]), fmt(r_cam[1]), fmt(r_cam[2]),
+                        # Pose Robot
+                        fmt(t_rob[0]), fmt(t_rob[1]), fmt(t_rob[2]),
+                        fmt(r_rob[0]), fmt(r_rob[1]), fmt(r_rob[2]),
+                        # File di overlay
+                        frame.get("overlay_file", "")
                     ]
                     writer.writerow(row)
 
-            log.info(f"Pose CSV written to {out_csv.name}")
+            log.info(f"Complete Pose CSV written to {out_csv.name}")
         except Exception as exc:
             log.error(f"Failed to write pose CSV: {exc}")
 

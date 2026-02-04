@@ -1,11 +1,11 @@
 from __future__ import annotations
 from typing import Any, Optional, Tuple, TYPE_CHECKING
 import numpy as np
+import cv2 as cv # Aggiunto per convertire R in rvec se necessario
 
 # Imports specifici del dominio
 from core.vision.api import estimate_truncated_ico_from_image
 from utils.utils import load_camera_calibration, load_ico_transforms
-from core.robot.robot_transform import transform_camera_to_robot
 
 if TYPE_CHECKING:
     from utils.config_models import FramePacket
@@ -52,8 +52,6 @@ class IcoPoseProcessor:
             )
 
         # --- 1. CARICAMENTO E CACHING RISORSE (K, Dist, Transforms) ---
-        
-        # A. Calibrazione Camera
         if self._cached_calib_path != str(calib_path):
             try:
                 self._K, self._dist = load_camera_calibration(str(calib_path))
@@ -61,27 +59,16 @@ class IcoPoseProcessor:
             except Exception as e:
                 return ({"file": packet.filename, "ok": False, "reason": f"calib_load_err: {e}"}, None)
         
-        # B. Trasformazioni Faccia->Corpo (CORRETTO: NESSUNO SCALING)
         if self._cached_trans_path != str(transform_path):
             try:
-                # Carichiamo le trasformazioni pure. Assumiamo che il JSON sia
-                # già corretto e in METRI.
                 self._transforms = load_ico_transforms(str(transform_path))
-                
-                # --- DEBUG ---
-                # Verifica immediata per evitare dubbi futuri
-                first_key = next(iter(self._transforms))
-                t_sample = self._transforms[first_key][:3, 3]
-                print(f"[ICO-LOAD] Loaded transforms. Sample ({first_key}) norm: {np.linalg.norm(t_sample):.4f}m")
-                # Se leggi ~0.058m qui, è PERFETTO.
-                # ------------- 
-
                 self._cached_trans_path = str(transform_path)
             except Exception as e:
                  return ({"file": packet.filename, "ok": False, "reason": f"trans_load_err: {e}"}, None)
-
+             
         # --- 2. STIMA POSA ---
         try:
+            # La funzione ora accetta T_base_cam e gestisce internamente la trasformazione
             result = estimate_truncated_ico_from_image(
                 image=packet.frame,
                 K=self._K,
@@ -89,8 +76,9 @@ class IcoPoseProcessor:
                 transforms=self._transforms,
                 aruco_dict=dict_name,
                 marker_size=marker_size,
-                return_overlay=True,
-                cfg=self.cfg
+                cfg=self.cfg,
+                T_base_cam=self._T_base_cam,
+                return_overlay=True
             )
             
         except ValueError as e:
@@ -99,49 +87,61 @@ class IcoPoseProcessor:
                 None,
             )
         except Exception as e:
-            # Ritorna stato fallito ma non crashare
             return (
                 {"file": packet.filename, "ok": False, "reason": f"pose_fail: {str(e)}"},
                 None,
             )
-    
-        # --- 2.5 TRASFORMAZIONE ROBOT ---
-        rvec_base, tvec_base = None, None
 
-        if result.get("ok", False):
-            tvec_tip_cam = result.get("tvec_tip")
-            rvec_tip_cam = result.get("rvec")
-            
-            if tvec_tip_cam is not None and rvec_tip_cam is not None:
-                rvec_base, tvec_base = transform_camera_to_robot(
-                    rvec_tip_cam, 
-                    tvec_tip_cam, 
-                    self._T_base_cam
-                )
 
-        # --- 3. FORMATTAZIONE OUTPUT ---
+        # --- 3. ESTRAZIONE DATI E FORMATTAZIONE ---
+        # Estrazione dati Posa Camera
+        tip_cam = result["tip_in_camera"]
+        # Convertiamo R in rvec (Rodrigues) se non presente nel dizionario, per coerenza con l'output JSON precedente
+        rvec_cam, _ = cv.Rodrigues(tip_cam["R"])
+        tvec_cam = tip_cam["tvec"]
+
+        # Estrazione dati Posa Robot (se disponibile)
+        tip_robot = result.get("tip_in_robot")
+        rvec_robot_list = None
+        tvec_robot_list = None
+
+        if tip_robot is not None:
+             rvec_rob, _ = cv.Rodrigues(tip_robot["R"])
+             rvec_robot_list = rvec_rob.flatten().tolist()
+             tvec_robot_list = tip_robot["tvec"].flatten().tolist()
+
+        # Estrazione Statistiche
+        stats = result.get("markers_stats", {})
+
+        # Estrazione Overlay
         overlay = result.get("overlay")
-
-        # Flattening sicuro per JSON
-        rvec_flat = result["rvec"].flatten().tolist()
-        tvec_flat = result["tvec"].flatten().tolist()
 
         frame_entry: dict[str, Any] = {
             "file": packet.filename,
             "ok": True,
-            # Dati RAW Camera
-            "rvec": rvec_flat,
-            "tvec": tvec_flat,
-            # Dati TRASFORMATI
-            "rvec_robot": rvec_base.tolist() if rvec_base is not None else None,
-            "tvec_robot": tvec_base.tolist() if tvec_base is not None else None,
             
-            "reproj_err": None,
-            "num_markers": int(result.get("num_markers", 0)),
+            # --- Output Base Camera ---
+            "rvec": rvec_cam.flatten().tolist(),
+            "tvec": tvec_cam.flatten().tolist(),
+            "dist_cam": float(tip_cam.get("dist", 0.0)), # Opzionale: Distanza punta-camera
+            
+            # --- Output Base Robot ---
+            "rvec_robot": rvec_robot_list,
+            "tvec_robot": tvec_robot_list,
+            "dist_robot": float(tip_robot.get("dist", 0.0)) if tip_robot else None,
+            
+            # --- Statistiche ---
+            "reproj_err": None, # Non calcolato globalmente in questo algoritmo
+            "num_markers": stats.get("found_valid", 0),
+            "num_outliers": stats.get("discarded_outliers", 0),
+            
             "timestamp": packet.iso_timestamp,
         }
 
-        if "filter_debug" in result and result["filter_debug"]:
-            frame_entry["marker_filter"] = result["filter_debug"]
+        # Aggiungiamo eventuali debug extra se presenti
+        if "markers_debug_info" in result:
+             # Nota: serializzare markers_debug_info potrebbe essere pesante per il JSON, 
+             # valutare se includerlo solo in modalità debug
+             pass
 
         return frame_entry, overlay

@@ -1,55 +1,27 @@
-﻿"""Plot capture session translation vectors in 3D with a reference plane."""
+﻿"""
+Plot capture session translation vectors in 3D with a reference plane.
+"""
 from __future__ import annotations
 
 import argparse
 import json
 from pathlib import Path
 from typing import Any, Iterable, List, Sequence
+import sys
+import pathlib
+import cv2 as cv2
 
+# Trova la cartella 'src' (ovvero il nonno del file attuale)
+root_path = pathlib.Path(__file__).parent.parent.resolve()
+sys.path.append(str(root_path))
 
 import matplotlib
 matplotlib.use("TkAgg")
 import matplotlib.pyplot as plt
 import numpy as np
-import yaml
+from utils.utils import load_config
 
-DEFAULT_CONFIG_NAME = "config.yaml"
 OVERLAY_SUFFIX = "_overlay"
-
-
-def load_config(config_path: Path) -> dict[str, Any]:
-    """Load YAML configuration data."""
-    if not config_path.exists():
-        raise FileNotFoundError(f"Config file not found: {config_path}")
-
-    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    if not isinstance(config, dict):
-        raise ValueError("Configuration root must be a mapping")
-    return config
-
-
-def resolve_session_path(
-    session_arg: Path | None,
-    config: dict[str, Any],
-    config_path: Path,
-) -> Path:
-    """Return the pose JSON path either from CLI or config."""
-    if session_arg is not None:
-        return session_arg
-
-    plot_cfg = config.get("plot")
-    if not isinstance(plot_cfg, dict):
-        raise ValueError("Missing 'plot' section in configuration")
-
-    default_pose = plot_cfg.get("default_pose_json")
-    if not default_pose:
-        raise ValueError("Missing 'default_pose_json' in configuration plot section")
-
-    path = Path(default_pose)
-    if not path.is_absolute():
-        path = (config_path.parent / path).resolve()
-    return path
-
 
 def load_session_data(session_path: Path) -> dict[str, Any]:
     """Load pose session JSON data."""
@@ -189,12 +161,6 @@ def main() -> None:
         help="Path to the *_pose.json file produced by a capture session",
     )
     parser.add_argument(
-        "--config",
-        type=Path,
-        default=Path(__file__).with_name(DEFAULT_CONFIG_NAME),
-        help="Config YAML path (defaults to config.yaml beside this script)",
-    )
-    parser.add_argument(
         "--title",
         default=None,
         help="Custom title for the 3D plot",
@@ -206,10 +172,9 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    config_path = args.config
-    config = load_config(config_path)
+    config = load_config(Path("../config/config.yaml"))
 
-    session_path = resolve_session_path(args.session_file, config, config_path)
+    session_path = Path(config.plot.default_pose_json)
     session_data = load_session_data(session_path)
     tvecs = load_tvecs(session_data, session_path)
 

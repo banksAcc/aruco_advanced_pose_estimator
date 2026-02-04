@@ -8,12 +8,12 @@ from pathlib import Path
 from typing import Optional
 
 from services.ble.ble_client import run_ble_client
-from services.pose.pose_service import PoseWorker
 from services.ble.session_manager import SessionManager
-from utils.utils import load_config
 
+from services.pose.pose_service import PoseWorker
+
+from utils.utils import load_config, Encode_as_bytes
 from utils.logger import get_logger, setup_logging
-from utils.utils import Encode_as_bytes
 
 
 # Loop policy recommended for Windows

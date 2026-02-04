@@ -1,40 +1,41 @@
+
+"""
+Script di debug che utilizziamo per verificare la correttezza del json di rototrasalzione dei marker
+dalla superficie del solido al centro del solido.
+
+Per ogni marker trovato salva il frame nella cartella di debug/ID_xx con l'overlay degli assi del marker e del centro del solido.
+"""
+
 import cv2 as cv
 import numpy as np
 import os
-import time
 from datetime import datetime
+import sys
+import pathlib
+from pathlib import Path
+
+# Trova la cartella 'src' (ovvero il nonno del file attuale)
+root_path = pathlib.Path(__file__).parent.parent.resolve()
+sys.path.append(str(root_path))
 
 # Import dai tuoi moduli
-from algo.detect import detect_markers
-from algo.pnp import estimate_marker_poses
-from algo.data_loader import load_camera_calibration, load_ico_transforms
+from core.vision.detect import detect_markers
+from core.vision.pnp import estimate_marker_poses
+from utils.config_models import AppConfig
+from utils.utils import load_camera_calibration, load_ico_transforms, load_config
 
-# --- CONFIGURAZIONE ---
-CALIB_PATH = "../calib/calib_data.npz"         # Percorso file calibrazione
-TRANSFORMS_PATH = "algo/transforms.json" # Percorso JSON
-MARKER_SIZE = 0.021679              # Dimensione marker in metri (es. 18mm)
-ARUCO_DICT = "4X4_50"            # Dizionario usato
-OUTPUT_DIR = "debug_frames"      # Cartella output immagini
-
-MARKER_MAP = {
-    1: "H5", 2: "H2", 3: "P0", 4: "H3", 5: "H0", 6: "H6", 7: "P2", 8: "P8", 
-    10: "H8", 9: "H4", 11: "P1", 12: "H9", 13: "P7", 14: "P6", 15: "H15", 
-    16: "P4", 17: "H1", 18: "H7", 19: "H14", 20: "H17", 21: "H19", 22: "P3", 
-    23: "H13", 24: "P11", 25: "P5", 26: "P10", 27: "H10", 28: "H16", 
-    29: "H11", 30: "H18", 31: "H12",
-}
-
+OUTPUT_DIR = "debug"      # Cartella output immagini
 
 def ensure_dir(path):
     if not os.path.exists(path):
         os.makedirs(path)
 
-def draw_single_marker_debug(img, K, dist, m_pose, face_id, transforms):
+def draw_single_marker_debug(img, K, dist, m_pose, face_id, transforms, cfg: AppConfig):
     """
     Funzione helper che disegna su 'img' SOLO i dati relativi a questo marker.
     """
     # 1. Disegna Assi Marker Locali (Piccoli)
-    cv.drawFrameAxes(img, K, dist, m_pose.rvec, m_pose.tvec, MARKER_SIZE, 2)
+    cv.drawFrameAxes(img, K, dist, m_pose.rvec, m_pose.tvec, cfg.pose.ico.marker_size_mm/1000, 2)
     
     # 2. Calcola e Disegna Centro Solido Stimato
     if face_id and face_id in transforms:
@@ -54,7 +55,7 @@ def draw_single_marker_debug(img, K, dist, m_pose, face_id, transforms):
 
         # Disegna Assi Corpo (Grandi e Spessi)
         # Se la matrice è giusta, questo sistema deve essere al centro della sfera
-        cv.drawFrameAxes(img, K, dist, rvec_body, t_body, MARKER_SIZE * 3, 3)
+        cv.drawFrameAxes(img, K, dist, rvec_body, t_body, cfg.pose.ico.marker_size_mm/1000 * 3, 3)
         
         # Linea Gialla: Marker -> Centro Stimato
         marker_center_px, _ = cv.projectPoints(m_pose.tvec, np.zeros(3), np.zeros(3), K, dist)
@@ -71,9 +72,11 @@ def draw_single_marker_debug(img, K, dist, m_pose, face_id, transforms):
 
 def main():
     print("[INFO] Caricamento dati...")
+    cfg = load_config(Path("../config/config.yaml"))
+    
     try:
-        K, dist = load_camera_calibration(CALIB_PATH)
-        transforms = load_ico_transforms(TRANSFORMS_PATH)
+        K, dist = load_camera_calibration(cfg.pose.camera_calibration_npz)
+        transforms = load_ico_transforms(cfg.pose.ico.transform_file)
     except Exception as e:
         print(f"[ERROR] {e}")
         return
@@ -99,23 +102,23 @@ def main():
         # Qui accumuliamo TUTTI i disegni per comodità dell'utente
         live_img = frame.copy()
 
-        detections = detect_markers(frame, ARUCO_DICT)
+        detections = detect_markers(frame, cfg.pose.ico.dictionary)
 
         if detections:
-            poses = estimate_marker_poses(detections, K, dist, MARKER_SIZE)
+            poses = estimate_marker_poses(detections, K, dist, cfg.pose.ico.marker_size_mm/1000)
             
             for det, m_pose in zip(detections, poses):
-                face_id = MARKER_MAP.get(det.id)
+                face_id = cfg.marker_map.get(det.id)
                 
                 # --- A. Disegno sulla Live View (Accumulativo) ---
-                draw_single_marker_debug(live_img, K, dist, m_pose, face_id, transforms)
+                draw_single_marker_debug(live_img, K, dist, m_pose, face_id, transforms, cfg)
 
                 # --- B. Salvataggio Isolato (Esclusivo per questo ID) ---
                 # Creiamo una copia PULITA del frame originale
                 save_img = frame.copy()
                 
                 # Disegniamo SOLO le info di questo marker
-                draw_single_marker_debug(save_img, K, dist, m_pose, face_id, transforms)
+                draw_single_marker_debug(save_img, K, dist, m_pose, face_id, transforms, cfg)
                 
                 # Salviamo nella cartella specifica
                 id_dir = os.path.join(OUTPUT_DIR, f"ID_{det.id}")

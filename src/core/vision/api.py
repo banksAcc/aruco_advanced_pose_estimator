@@ -8,15 +8,7 @@ from .pnp import estimate_marker_poses
 from ..geometry.geometry import average_poses, quat_from_R
 from .viz import draw_sphere_overlay, draw_detected_markers_with_projection, draw_large_axes
 from utils.config_models import AppConfig
-
-def transform_to_robot_base(T_cam_obj: np.ndarray, T_base_cam: Optional[np.ndarray]) -> np.ndarray:
-    """
-    Applica la trasformazione estrinseca Camera -> Base Robot.
-    Se T_base_cam è None, restituisce la posa originale (Base = Camera).
-    """
-    if T_base_cam is None:
-        return T_cam_obj
-    return T_base_cam @ T_cam_obj
+from ..robot.robot_transform import transform_camera_to_robot
 
 def estimate_truncated_ico_from_image(
     image: np.ndarray,
@@ -142,17 +134,30 @@ def estimate_truncated_ico_from_image(
     T_cam_tip[:3, 3] = t_tip_cam
 
     # =========================================================================
-    # 7. TRASFORMAZIONE BASE ROBOT (CAM -> BASE)
+    # 7. TRASFORMAZIONE BASE ROBOT E CALCOLI DISTANZE
     # =========================================================================
     # Convertiamo i risultati finali nel sistema di riferimento del robot
     
-    T_base_tip = transform_to_robot_base(T_cam_tip, T_base_cam)
+    # 7.1 Posa punta in Base Camera (Posa completa)
+    # T_cam_tip è già stata calcolata al punto 6
     
-    # Estraiamo i componenti finali per l'output (Base Frame)
-    t_final_base = T_base_tip[:3, 3]
-    R_final_base = T_base_tip[:3, :3]
-    quat_final_base = quat_from_R(R_final_base)
-    rvec_final_base, _ = cv.Rodrigues(R_final_base)
+    # 7.2 Posa punta in Base Robot (Posa completa)
+    # Se T_base_cam è None, transform_camera_to_robot dovrà gestire il fallback 
+    # (restituendo ad esempio la posa in camera o sollevando errore a seconda della logica)
+    T_base_tip = transform_camera_to_robot(T_cam_tip, T_base_cam)
+    
+    # 7.3 Calcolo Distanze (Norme dei vettori traslazione)
+    dist_tip_camera = np.linalg.norm(T_cam_tip[:3, 3])
+    
+    # Gestione sicura del caso "Robot non calibrato"
+    dist_tip_robot = None
+    if T_base_tip is not None:
+        dist_tip_robot = np.linalg.norm(T_base_tip[:3, 3])
+
+    # 7.4 Conteggio Marker
+    num_markers_found = len(sphere_candidates_cam)      # Tutti quelli che hanno superato il filtro area
+    num_markers_inliers = len(inlier_indices)           # Quelli usati per la media (dopo outlier rejection)
+    num_markers_discarded = num_markers_found - num_markers_inliers
 
     # =========================================================================
     # 8. DISEGNO OVERLAY (VISUALIZZAZIONE)
@@ -218,16 +223,31 @@ def estimate_truncated_ico_from_image(
         overlay_img = debug_img
 
     return {
-        # Output nel Frame Richiesto (Robot Base se T_base_cam è presente, altrimenti Camera)
-        "rvec": rvec_final_base,
-        "tvec": t_final_base,
-        "R": R_final_base,
-        "quat": quat_final_base,
-        
-        # Dati grezzi/debug
-        "num_markers": len(sphere_candidates_cam),
+        # Overlay immagine modificata con disegno marker, assi
         "overlay": overlay_img,
         
-        # Extra: se serve sapere la posa punta rispetto alla camera (es. per servoing visivo diretto)
-        "tvec_tip_cam": T_cam_tip[:3, 3]
+        # Posa Punta in CAMERA (Completa)
+        "tip_in_camera": {
+            "T": T_cam_tip,
+            "tvec": T_cam_tip[:3, 3],
+            "R": T_cam_tip[:3, :3],
+            "quat": quat_from_R(T_cam_tip[:3, :3]),
+            "dist": dist_tip_camera
+        },
+        
+        # Posa Punta in ROBOT (Completa)
+        "tip_in_robot": {
+            "T": T_base_tip,
+            "tvec": T_base_tip[:3, 3],
+            "R": T_base_tip[:3, :3],
+            "quat": quat_from_R(T_base_tip[:3, :3]),
+            "dist": dist_tip_robot
+        },
+        
+        # Statistiche Marker
+        "markers_stats": {
+            "found_valid": num_markers_found,      # Passati da filtro area e mappatura JSON
+            "used_inliers": num_markers_inliers,   # Effettivamente usati dopo RANSAC/Outlier filter
+            "discarded_outliers": num_markers_discarded
+        }
     }

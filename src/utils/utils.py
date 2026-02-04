@@ -55,6 +55,3 @@ def load_ico_transforms(json_path: str) -> Dict[str, np.ndarray]:
     
     # Converte le liste in numpy array
     return {k: np.asarray(v, dtype=float) for k, v in data.items()}
-
-BLE_COMPUTATION_START = Encode_as_bytes("COMPUTATION START")
-BLE_COMPUTATION_END = Encode_as_bytes("COMPUTATION END")
