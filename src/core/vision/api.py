@@ -6,7 +6,7 @@ import cv2 as cv
 from .detect import detect_markers
 from .pnp import estimate_marker_poses
 from ..geometry.geometry import average_poses, quat_from_R
-from .viz import draw_sphere_overlay, draw_detected_markers_with_projection, draw_large_axes
+from .viz import draw_sphere_wireframe, draw_detected_markers_with_projection, draw_large_axes
 from utils.config_models import AppConfig
 from ..robot.robot_transform import transform_camera_to_robot
 
@@ -205,14 +205,16 @@ def estimate_truncated_ico_from_image(
 
         # 2. SFERA MEDIA (Rosso trasparente) - Solo volume e wireframe
         rvec_sphere_cam, _ = cv.Rodrigues(T_cam_sphere_avg[:3, :3])
-        debug_img = draw_sphere_overlay(
-            debug_img, K, dist,
+        debug_img = draw_sphere_wireframe(
+            debug_img,
+            K, 
+            dist,
             rvec=rvec_sphere_cam,
             tvec=T_cam_sphere_avg[:3, 3],
-            radius= cfg.pose.ico.geo_radius,
-            color=(0, 0, 255),
-            alpha=0.15,
-            tvec_axes=None # Rimuoviamo assi dal centro sfera per pulizia
+            radius=cfg.pose.ico.geo_radius,
+            color=(0, 0, 255),  # Rosso
+            rings=12,           # Aumenta per maggiore densità visiva
+            segments=24
         )
         
         # 3. PUNTA PENNA (Assi Grandi)

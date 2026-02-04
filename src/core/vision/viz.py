@@ -3,53 +3,53 @@ import cv2 as cv
 import numpy as np
 from typing import Tuple, List, Optional
 
-def draw_sphere_overlay(img: np.ndarray, K: np.ndarray, dist: np.ndarray, 
-                        rvec: np.ndarray, tvec: np.ndarray, 
-                        radius: float, 
-                        color: Tuple[int, int, int] = (0, 0, 255), 
-                        alpha: float = 0.2,
-                        tvec_axes: Optional[np.ndarray] = None) -> np.ndarray: # <--- NUOVO PARAMETRO
+def draw_sphere_wireframe(img: np.ndarray, K: np.ndarray, dist: np.ndarray, 
+                          rvec: np.ndarray, tvec: np.ndarray, 
+                          radius: float, 
+                          color: Tuple[int, int, int] = (0, 0, 255),
+                          rings: int = 12, 
+                          segments: int = 24,
+                          alpha: float = 0.5) -> np.ndarray: # <--- Nuovo parametro
     """
-    Disegna la sfera su 'tvec' e gli assi su 'tvec_axes' (se fornito, altrimenti su tvec).
+    Disegna una sfera wireframe con supporto alla trasparenza (alpha).
     """
-    overlay = img.copy()
-    output = img.copy()
-    
-    # --- Disegno SFERA (usa tvec originale) ---
-    center_2d_pts, _ = cv.projectPoints(np.array([[0.,0.,0.]]), rvec, tvec, K, dist)
-    cx, cy = center_2d_pts[0].ravel().astype(int)
-    
-    edge_2d_pts, _ = cv.projectPoints(np.array([[radius, 0., 0.]]), rvec, tvec, K, dist)
-    ex, ey = edge_2d_pts[0].ravel().astype(int)
-    radius_px = int(np.linalg.norm([ex - cx, ey - cy]))
-    
+    # 1. Crea un overlay vuoto (nero)
+    overlay = np.zeros_like(img)
     h, w = img.shape[:2]
-    if radius_px > 0 and 0 <= cx < w and 0 <= cy < h:
-        # Sfera solida trasparente
-        cv.circle(overlay, (cx, cy), radius_px, color, -1)
-        cv.addWeighted(overlay, alpha, output, 1 - alpha, 0, output)
-        
-        """
-        # Wireframe Sfera
-        pts_3d, lines_idx = _get_sphere_geometry(radius)
-        pts_2d, _ = cv.projectPoints(pts_3d, rvec, tvec, K, dist)
-        pts_2d = pts_2d.reshape(-1, 2).astype(int)
-        line_color = (color[0], color[1] + 100, color[2]) 
-        
-        for p1_idx, p2_idx in lines_idx:
-            pt1 = tuple(pts_2d[p1_idx])
-            pt2 = tuple(pts_2d[p2_idx])
+    
+    # --- Generazione punti 3D (Meridiani e Paralleli) ---
+    all_pts_3d = []
+    # Paralleli
+    for i in range(1, rings):
+        phi = np.pi * i / rings
+        z, r_phi = radius * np.cos(phi), radius * np.sin(phi)
+        for j in range(segments):
+            theta = 2 * np.pi * j / segments
+            all_pts_3d.append([r_phi * np.cos(theta), r_phi * np.sin(theta), z])
+    # Meridiani
+    for i in range(rings):
+        theta = np.pi * i / rings
+        for j in range(segments):
+            phi = 2 * np.pi * j / segments
+            all_pts_3d.append([radius * np.sin(phi) * np.cos(theta), 
+                               radius * np.sin(phi) * np.sin(theta), 
+                               radius * np.cos(phi)])
+
+    pts_3d = np.array(all_pts_3d, dtype=np.float32)
+    pts_2d, _ = cv.projectPoints(pts_3d, rvec, tvec, K, dist)
+    pts_2d = pts_2d.reshape(-1, segments, 2).astype(int)
+
+    # 2. Disegna le linee sull'OVERLAY invece che sull'immagine finale
+    for ring in pts_2d:
+        for j in range(len(ring)):
+            pt1, pt2 = tuple(ring[j]), tuple(ring[(j + 1) % len(ring)])
             if (0 <= pt1[0] < w and 0 <= pt1[1] < h) or (0 <= pt2[0] < w and 0 <= pt2[1] < h):
-                cv.line(output, pt1, pt2, line_color, 1, cv.LINE_AA)
-        """
+                cv.line(overlay, pt1, pt2, color, 1, cv.LINE_AA)
 
-        # --- Disegno ASSI (usa tvec_axes se esiste) ---
-        target_tvec = tvec_axes if tvec_axes is not None else tvec
-        
-        # Lunghezza assi visualizzati
-        axis_len = radius * 1.5
-        cv.drawFrameAxes(output, K, dist, rvec, target_tvec, axis_len, 3)
-
+    # 3. Fonde l'overlay con l'immagine originale
+    # output = img * (1 - alpha) + overlay * alpha
+    output = cv.addWeighted(img, 1.0, overlay, alpha, 0)
+    
     return output
 
 def draw_detected_markers(img: np.ndarray, detections, poses, K, dist, size, 
@@ -113,10 +113,6 @@ def draw_large_axes(img: np.ndarray, K: np.ndarray, dist: np.ndarray,
     length = 0.05 * scale
     cv.drawFrameAxes(img, K, dist, rvec, tvec, length, 4) # Spessore 4
     return img
-
-from typing import List, Optional, Union
-import numpy as np
-import cv2 as cv
 
 def draw_detected_markers_with_projection(
     img: np.ndarray, 
