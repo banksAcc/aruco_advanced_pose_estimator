@@ -1,99 +1,71 @@
-﻿# ESP32 BLE Trigger -> PC Capture & Pose Pipeline
+﻿# BLE-Aruco Stylus Tracker: 6DOF Pose Estimation System
 
-## Overview
-This directory hosts the Python application that listens for BLE triggers from an ESP32 device, captures images, and performs optional cube pose estimation.
+Sistema integrato per la stima della posa a 6 gradi di libertà (6DOF) di uno stilo basato su **icosaedro troncato**, con attivazione remota via **BLE** e pipeline di visione industriale **Basler**.
+<p align="center">
+<img src="src\debug\frame_000011_20260204_223833_overlay.png" alt="L'output del sistema" height="400">
+</p>
 
-## Features
-- Start or stop capture sessions from a physical ESP32 button.
-- Stream captured frames in-memory to the pose worker for low-latency processing.
-- Optionally persist frames (raw images plus `_overlay` diagnostics) by enabling `capture.save_frames` and, if desired, `pose.save_overlay`.
-- Support webcams or industrial cameras such as Basler via `pypylon`.
+---
 
-## Prerequisites
-- Python 3.10 or newer available on the system `PATH`.
-- `pip` for installing Python dependencies.
-- Optional Basler Pylon drivers and the `pypylon` package when using Basler cameras.
-- BLE tooling (BlueZ on Linux, native stack on Windows/macOS) to pair the ESP32.
+## 📌 Panoramica del Sistema
 
-## Project Structure
-```
-app/
-  app.py               # application entry point
-  ble_client.py        # BLE connection and message handling
-  capture.py           # camera acquisition or simulated frame sourcing
-  click_test.py        # quick script to validate BLE button callbacks
-  config.yaml          # runtime configuration
-  pose_worker.py       # asynchronous pose computation
-  requirements.txt
-  session_manager.py   # session lifecycle management
+Il progetto gestisce l'intero ciclo di vita del dato, dalla pressione di un pulsante fisico su un **ESP32** alla generazione di file di test (JSON/CSV) con la posizione millimetrica della punta della penna.
 
-calib/                  # sample calibration data
-captures/               # capture sessions written here
-image_to_be_used/       # sample dataset for simulated mode
-```
 
-## Installation
-Run the commands from the `pc/` directory.
 
-### Linux/macOS (bash/zsh)
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r app/requirements.txt
-```
+### Workflow Operativo
+1.  **Connessione**: All'avvio, il PC (`main.py`) stabilisce un link BLE con l'ESP32 basandosi sulle impostazioni di `config.yaml`.
+2.  **Trigger**: La pressione di un pulsante sull'ESP32 invia un comando al PC.
+3.  **Acquisizione**: Il PC attiva la camera Basler, catturando una sequenza di frame gestiti in multi-threading.
+4.  **Processamento**: Rilevamento ArUco, fusione delle pose e proiezione sulla punta (Tip).
+5.  **Output**: Salvataggio di overlay grafici per debug, log CSV per analisi e matrici JSON per i test.
 
-### Windows (PowerShell)
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r app\requirements.txt
-```
+---
 
-Deactivate the virtual environment with `deactivate` when you are done.
+## 🏗️ Architettura del Software
 
-## Quick Configuration
-1. Copy `app/config.example.yaml` to `app/config.yaml` if the example file is available. Otherwise duplicate the existing `config.yaml` before editing.
-2. For simulated runs, set `capture.simulate_camera: true` and point `capture.test_source_dir` to `../image_to_be_used` or another folder with sample frames.
-3. For real hardware, set `capture.simulate_camera: false`, choose `capture.camera_type` (`webcam`, `ip`, `basler`, etc.), and configure `capture.camera_id`, `capture.camera_serial`, or `capture.camera_ip` as required.
-4. Decide whether to persist frames by setting `capture.save_frames` (disabled by default to favour throughput).
-5. Confirm `pose.camera_calibration_npz` points to a valid calibration file inside `calib/`.
-6. Adjust logging preferences with `runtime.log_level` and `runtime.log_to_file` if you need more diagnostics.
+### 1. Vision & Pose Estimation (`src/vision/api.py`)
+La funzione core `estimate_truncated_ico_from_image` implementa la pipeline di visione:
+* **Detection & Refinement**: Individuazione marker con raffinazione corner sub-pixel (`cornerSubPix`) per la massima precisione angolare.
+* **Filtraggio Area**: Scarto automatico di marker troppo piccoli o distanti.
+* **PnP Solving**: Risoluzione del problema *Perspective-n-Point* per ottenere la trasformazione $T_{cam \to marker}$.
+* **Proiezione**: Trasformazione della posa di ogni marker nel centro dell'oggetto:
+    $$T_{cam \to body} = T_{cam \to marker} \times T_{marker \to body}$$
 
-## Execution
-- Simulated mode (no camera): ensure `capture.simulate_camera: true`, then run
-  ```bash
-  python app/app.py
-  ```
-- Real camera mode: set `capture.simulate_camera: false`, install any manufacturer drivers (for Basler, install Pylon and `pip install pypylon`), then execute
-  ```bash
-  python app/app.py
-  ```
-- Quick BLE test: validate button presses and logging without the full pipeline using
-  ```bash
-  python app/click_test.py
-  ```
+### 2. Fusione Dati Robusta (`core/geometry/geometry.py`)
+Il modulo `average_poses` fonde le molteplici ipotesi di posa in un unico dato stabile:
+* **Angle Filter**: Scarta i marker visti con angoli troppo acuti dove l'errore sull'asse $Z$ aumenta esponenzialmente.
+* **Weighted Mean**: Calcola la media pesata basata sull'area dei marker (esponente di peso personalizzabile in config).
+* **Outlier Rejection**: Filtra i marker che si discostano eccessivamente dalla media preliminare.
 
-## Test and Debug
-- Each capture session writes a `session.log` file inside the session folder under `captures/`.
-- Global logging can be enabled with `runtime.log_to_file: true`, producing `app.log` in the project root.
-- Raise verbosity by setting `runtime.log_level` to `DEBUG`, then restart the application to reload the configuration.
-- BLE connection states, capture errors, and pose worker issues are all reported in the logs for post-mortem analysis.
+### 3. Modellazione Geometrica (`snippet/gen_ico_transform.py`)
+Script fondamentale per la generazione della **Mappa Geometrica Digitale**:
+* Genera matematicamente i vertici dell'icosaedro troncato (12 pentagoni, 20 esagoni) usando la sezione aurea $\phi$.
+* Applica offset manuali per compensare eventuali imprecisioni nel montaggio fisico dei marker.
+* Esporta `transforms_final.json`, contenente le matrici $T_{body \to face}$ necessarie per la localizzazione.
 
-## Key Parameters
-| Parameter | Section | Purpose | Example |
-| --- | --- | --- | --- |
-| `capture.frequency_ms` | `capture` | Interval between frame acquisitions in milliseconds. | `200` |
-| `capture.simulate_camera` | `capture` | Toggle between simulated datasets and live cameras. | `true` |
-| `capture.save_frames` | `capture` | Enable asynchronous persistence of raw frames. | `false` |
-| `pose.save_overlay` | `pose` | Persist diagnostic overlays next to raw frames (`*_overlay.tiff`). | `true` |
-| `capture.frame_queue_size` | `capture` | Number of frames buffered between capture and pose processing. | `4` |
-| `capture.test_source_dir` | `capture` | Directory for sample frames when simulating. | `../image_to_be_used` |
-| `pose.method` | `pose` | Select the pose solver (`cube`, `custom`). | `cube` |
-| `pose.max_parallel_jobs` | `pose` | Limit concurrent pose computations. | `3` |
-| `runtime.log_level` | `runtime` | Set logging verbosity (`DEBUG`, `INFO`, `WARNING`, `ERROR`). | `INFO` |
-| `runtime.log_to_file` | `runtime` | Enable writing aggregated logs to `app.log`. | `false` |
+---
 
-Pose results are saved alongside session folders. The `cube_minimal` code is consumed directly from the repository checkout (via `vendor_cube_minimal.py`), so no pip install of that package is required. Refer to `../cube_minimal/README.md` for details on interpreting the cube pose output and validating calibration.
+## 📂 Struttura delle Cartelle
+
+| Directory | Descrizione |
+| :--- | :--- |
+| `calibration/` | Script di calibrazione camera e generazione pattern ArUco (SVG). |
+| `config/` | `config.yaml`: Il cervello del sistema (soglie, IP, parametri geometrici). |
+| `src/core/` | Logica matematica, trasformazioni robotiche e motori di visione. |
+| `src/services/` | Gestione hardware: client BLE e driver per camera Basler. |
+| `src/snippet/` | Tool di utilità: generatore solido 3D e test rapidi via webcam. |
+
+---
+
+## 🛠️ Configurazione e Debug
+
+Il sistema include un'interfaccia di debug avanzata tramite `core/vision/viz.py`:
+* **Disegno Contorni**: Identifica i marker rilevati e previene il problema del "flipping".
+* **Overlay punta**: Visualizza in tempo reale la stima della punta traslata lungo l'asse $Z$ locale.
+* **Validazione**: Separa visivamente i dati validi dai disturbi ambientali.
+
+> **Nota**: Se lo stilo viene riassemblato, è necessario rieseguire `gen_ico_transform.py` per aggiornare il modello matematico nel file `transforms_final.json`.
 
 ## License
 All rights reserved.
@@ -102,3 +74,5 @@ This software and all associated files are the exclusive property of Angelo Mile
 Unauthorized copying, modification, distribution, or use of this software, via any medium, is strictly prohibited.
 
 For inquiries about licensing, please contact: <angelo_milella_dev@yahoo.com>.
+
+---
