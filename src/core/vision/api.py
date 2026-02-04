@@ -57,6 +57,7 @@ def estimate_truncated_ico_from_image(
     
     sphere_candidates_cam = []  # Lista di matrici 4x4 (Pose del Centro Sfera)
     weights = []                # Pesi associati (Area)
+    marker_rotations_for_filter = [] # Salviamo le R originali dei marker
     
     # Struttura dati per debugging/viz (contiene info per ogni singolo marker valido)
     markers_debug_info = []
@@ -79,7 +80,7 @@ def estimate_truncated_ico_from_image(
         
         # T_cam_marker: dal Marker alla Camera
         T_cam_marker = np.eye(4)
-        T_cam_marker[:3, :3] = m_pose.R
+        T_cam_marker[:3, :3] = m_pose.R  # Questa è la rotazione che serve per il filtro
         T_cam_marker[:3, 3] = m_pose.tvec.flatten()
         
         # T_cam_body_candidate: Dove questo marker dice che è il centro sfera
@@ -87,6 +88,7 @@ def estimate_truncated_ico_from_image(
         T_cam_sphere_candidate = T_cam_marker @ T_face_body
         
         sphere_candidates_cam.append(T_cam_sphere_candidate)
+        marker_rotations_for_filter.append(m_pose.R)
         weights.append(det.area_px)
         
         # Salviamo i dati raw per uso futuro (overlay o debug)
@@ -107,7 +109,8 @@ def estimate_truncated_ico_from_image(
     # average_poses rimuove outlier e calcola la media robusta
     # Output: T_cam_sphere_avg (Posa media del centro sfera rispetto alla camera)
     T_cam_sphere_avg, inlier_indices= average_poses(
-        sphere_candidates_cam, 
+        sphere_candidates_cam,
+        marker_rotations= marker_rotations_for_filter,
         weights=weights,
         weight_exponent= cfg.pose.marker_filter_average.weight_exponent,
         outlier_distance_threshold= cfg.pose.marker_filter_average.outliers_threshold # Esempio: scarta se > 2cm dalla media

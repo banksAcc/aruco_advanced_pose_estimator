@@ -66,10 +66,12 @@ def _compute_mean_pose(poses: List[np.ndarray], weights: np.ndarray) -> np.ndarr
     return T_out
 
 def average_poses(
-    poses_4x4: List[np.ndarray], 
+    poses_4x4: List[np.ndarray],
+    marker_rotations: List[np.ndarray],    # Rotazioni pure dei marker (R_cam_marker)
     weights: Optional[List[float]] = None,
     weight_exponent: float = 2.0,
-    outlier_distance_threshold: Optional[float] = None
+    outlier_distance_threshold: Optional[float] = None,
+    max_angle_deg: float = 80  # Scarta oltre i 80 gradi
 ) -> Tuple[np.ndarray, List[int]]:
     """
     Calcola la media pesata delle pose rimuovendo gli outlier.
@@ -78,20 +80,46 @@ def average_poses(
     n = len(poses_4x4)
     if n == 0:
         raise ValueError("Lista pose vuota.")
-
-    # 1. Preparazione Pesi
-    if weights is None:
-        raw_weights = np.ones(n)
-    else:
-        raw_weights = np.array(weights, dtype=float)
     
-    # Evitiamo pesi zero e applichiamo l'esponente
-    raw_weights = np.maximum(raw_weights, 1e-3)
-    proc_weights = np.power(raw_weights, weight_exponent)
+    # Convertiamo la soglia in coseno per velocizzare i calcoli
+    # Un angolo di 0 gradi -> cos = 1.0 (marker frontale)
+    # Un angolo di 90 gradi -> cos = 0.0 (marker di taglio)
+    min_cos_theta = np.cos(np.radians(max_angle_deg))
+
+    valid_poses = []
+    valid_raw_weights = []
+    initial_indices = []
+
+    # --- FILTRO A MONTE: Angolo di incidenza ---
+    for i in range(n):
+        # USIAMO LA ROTAZIONE DEL MARKER, NON DELLA POSA 4x4
+        R_marker = marker_rotations[i]
+        
+        # L'asse Z del marker nel sistema camera è la terza colonna: R[:, 2]
+        # Il prodotto scalare con l'asse Z camera [0,0,1] è R_marker[2, 2]
+        cos_theta = abs(R_marker[2, 2])
+        
+        if cos_theta >= min_cos_theta:
+            valid_poses.append(poses_4x4[i])
+            valid_raw_weights.append(weights[i] if weights is not None else 1.0)
+            initial_indices.append(i)
+        else:
+            angle_actual = np.degrees(np.arccos(min(1.0, cos_theta)))
+            print(f"  > Scartato marker {i}: troppo inclinato ({angle_actual:.1f}°)")
+
+    # Se nessun marker supera il filtro inclinazione, ci fermiamo subito
+    if not valid_poses:
+        print(f" [AVG] Fallimento: Tutti i {n} marker sono troppo inclinati.")
+        return None, []
+    
+    # Usiamo solo i pesi associati ai marker che hanno superato il filtro angolo
+    proc_weights = np.array(valid_raw_weights, dtype=float)
+    proc_weights = np.maximum(proc_weights, 1e-3)
+    proc_weights = np.power(proc_weights, weight_exponent)
 
     # 2. Calcolo della media preliminare (su TUTTI i marker)
     # Assumo che _compute_mean_pose sia definita altrove nel tuo codice
-    T_initial = _compute_mean_pose(poses_4x4, proc_weights)
+    T_initial = _compute_mean_pose(valid_poses, proc_weights)
     
     # Se non c'è soglia di outlier, abbiamo finito qui
     if outlier_distance_threshold is None or outlier_distance_threshold <= 0:
@@ -104,8 +132,9 @@ def average_poses(
     final_weights = []
     inlier_indices = []
 
-    for i in range(n):
-        pose = poses_4x4[i]
+    # Sia l'oggetto che l'indice della lista filtrata:
+    for i, pose in enumerate(valid_poses):
+        #pose = valid_poses
         w = proc_weights[i]
         
         # Calcola distanza euclidea dal centro calcolato
@@ -114,15 +143,15 @@ def average_poses(
         if dist <= outlier_distance_threshold:
             final_poses.append(pose)
             final_weights.append(w)
-            inlier_indices.append(i) # <--- Segna come inlier
+            # Usa l'indice originale che avevi salvato prima:
+            inlier_indices.append(initial_indices[i])
         else:
             print(f"  > Dropped marker {i} (Dist: {dist:.3f})")
 
-    # 4. Calcolo finale sui soli inlier
+    # 4. CONTROLLO FINALE
     if not final_poses:
-        # Se abbiamo scartato tutto (troppo restrittivi), torniamo la media iniziale come fallback
-        print("  [AVG] WARNING: All markers rejected. Returning initial mean.")
-        return T_initial, list(range(n)) # Tutti inlier come fallback
+        print(f" [AVG] Fallimento: Nessun marker entro la soglia di distanza ({outlier_distance_threshold}m).")
+        return None, []
 
     # Ricalcoliamo la media solo con i marker "buoni"
     T_final = _compute_mean_pose(final_poses, np.array(final_weights))

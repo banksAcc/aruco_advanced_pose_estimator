@@ -14,7 +14,7 @@ capture:                                                                 # Param
   output_root: "../captures"                                             # Can also be in OneDrive; keeping it local is faster
   save_frames: true                                                      # When true, persist frames with pose overlays if available
   frame_queue_size: 4                                                    # Max number of frames waiting in the in-memory stream
-  simulate_camera: false                                                 # True = test mode (uses images from a folder)
+  simulate_camera: true                                                 # True = test mode (uses images from a folder)
   camera_type: "pylon"                                                   # "opencv" for webcam or "pylon" for basler.
   camera_id: 0                                                           # Webcam id (0 usually works)
   camera_serial: 23324651                                                # Serial number for industrial cameras (pylon)
